@@ -4,6 +4,293 @@ All notable changes to this project are documented in this file. The format
 is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the
 project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.8.18]
+
+### Changed
+
+- **Union Alpha stealth 预览接入**（2026-09-16 发布当日复核）：
+  - **openrouter 新增 `stealth/union-alpha`**：$0 计费实测出字（cost:0）、
+    262k 上下文、支持视觉、不占 `:free` 日额——freeModels 显式声明免费。
+  - **opencode 上新 `union-alpha` 但免费档启用客户端围栏**：API 直调无论
+    是否带 Key 均报 FreeTierError（「free tier can only be used from within
+    OpenCode」），7 款 -free 暂无法从第三方工具调用——freeModels 置空、
+    defaultModel 改 union-alpha，opencode 暂从免费路由退出（目录同步）。
+
+## [0.8.17]
+
+### Changed
+
+- **免费模型目录 2026-09-16 全量复查**（live 探测 + 带 Key 实测）：
+  - **B.AI 免费档失效**：deepseek-v4-flash / deepseek-v4-flash-vision-exp 已
+    从 /models 下线；零余额账户实测全模型返回 insufficient_user_quota（含
+    旧免费款 hy3 / mimo-v2.5）。种子表 freeModels 置空、models 收敛为在列
+    2 款、defaultModel 改 hy3——B.AI 暂从免费路由退出（充值后可用性未验证）。
+  - 远程目录同步更新并部署（config.freetokenbox.com 与
+    freeroute-catalog.pages.dev 双源一致）：openrouter 新增
+    z-ai/glm-5.2:free 与 inclusionai/ling-3.0-flash-vl:free、移除两款
+    下线 minimax；amd-radeon 换血（Vision-Exp 下线，GLM-5.3-Flash /
+    Qwen3.8-27B 上新且实测出字，MinerU2.5-Pro 为 OCR 专用未收录）；
+    aihubmix minimax-m3-free 下线（54→53）；orcarouter 清理 qwen3.8-27b-free
+    （orcaverify-text1.0-free 为检测专用模型不收录）；nvidia 清理 minimax-m3。
+  - 高级设置 freeModels 示例与 test/e2e-bai.mjs 断言同步新现实。
+
+## [0.8.16]
+
+### Changed
+
+- 行头内边距收紧 `8px 10px` → `8px`；卡片圆角 16px → 10px（与模型条目
+  一致，紧凑行观感更协调）；卡身水平内边距同步对齐 8px。
+
+## [0.8.15]
+
+### Fixed
+
+- **根治「旧样式层叠泄漏」**——这是 0.8.13/0.8.14 三项症状（行头
+  `width: 100%`、text 堆叠换行、卡片双内边距偏高）的真正来源：`dsh web`
+  进程重启/插件热更后，长开的浏览器页签里旧版本 `<style>` 成为孤儿（其
+  disposer 已随旧进程消亡），旧规则顶掉新表未显式声明的属性。
+  - CSS 头部加**版本标记**（`/* dsh-freeroute-client-css v<version> */`，
+    构建时由 package.json 单源注入，动态/静态两条构建链同步）。
+  - 挂载时执行 `sweepStaleStyles()`：按标记清扫所有非当前版本的
+    freeroute 样式元素（以 `.frp-tab`/`.frp-cards` 独有选择器识别，
+    不触碰宿主与第三方样式）。动态（styles.insert）与静态（web 模块）
+    两条挂载路径都已接入。
+  - 无头 Chrome 端到端实测：清扫后旧表（0.8.10/0.8.11 模拟）全部移除、
+    当前版本表保留、宿主样式不动、`width:100%`/旧 padding/column 泄漏消失。
+
+### Tests
+
+- client-integration 51 项全绿（清扫函数在无 document 环境下守卫直返）。
+
+## [0.8.14]
+
+### Changed
+
+- **上游/模型卡片几何修复**（无头 Chrome 实测驱动，修正三项反馈）：
+  - 按反馈**删除 `.frp-ucard` 的 `padding: 12px 14px`**（连同 `gap`），内边距改由
+    行头（`8px 10px`）与卡身（`10px 10px 12px`）各自承担；卡片高度 46→38px，
+    不再撑宽撑高。
+  - **chevron 改固定 16px 方形盒**：原先裸 '›' 旋转后字形戳出行头右缘
+    （实测任意宽度恒定溢出 7px，即「head 超出外部区域」），方形盒旋转后
+    溢出归零。
+  - 行头/文本区显式 `flex-direction: row` + `flex-wrap: nowrap`（防御性：
+    任何环境下名称/标签/圆点都不堆叠换行，超长一律省略号）。
+  - ↑/↓ 图标按钮微缩（11px / padding 2px 5px），缓解行头拥挤。
+
+### Tests
+
+- 无头 Chrome 几何回归：200–720px 全宽度卡片高 38px、head 溢出 0、
+  text 单行 20px、name 正常省略。client-integration 51 项不变全绿。
+
+## [0.8.13]
+
+### Changed
+
+- **「免费」列表行几何对齐默认 provider 行**（修正 0.8.11 引入的布局偏差）：
+  - 模型条目放弃比例网格列（第二列文字从行中 58% 处起排，视觉居中悬浮），
+    改为单行 flex 左贴：等宽 id 定宽 + 名称·上下文弹性左对齐（超长省略）+
+    chevron 靠右；条目内边距 6px → 4px 8px（≈原生 candidate 行 26px）。
+  - 供应商映射行同步收紧（padding 4px 8px），与模型行同高。
+  - 上游行头对齐原生 rowIdentity/rowActions 结构：名称 → Key 标签 → 状态圆点
+    顺序（credentialDot 同位），控件区（↑/↓/开关）改 `margin-left:auto` 右移，
+    文本区不再 `flex:1`；圆点 9px → 8px 对齐原生 credentialDot。
+
+### Tests
+
+- client-integration 第 7 节断言同步（行头 rowIdentity 三件套、chevron 索引、
+  模型行条左贴结构），51 项全绿。
+
+## [0.8.12]
+
+### Changed
+
+- **「免费」面板字号整体收一档**：行头名称 14→13px、模型 id 与供应商映射模型
+  13→12px、字段值 13→12px、高级设置分组标题 15→13px、面板头标题 16→14px。
+  卡片/网格/字段结构不变，仅回到紧凑排版。
+
+## [0.8.11]
+
+### Changed
+
+- **「免费」面板列表形态对齐「设置 → 模型」页（默认模型列表）**：
+  - 上游卡片改为宿主 rowCard 形态——透明底、`.5px` 边框、圆角 16px、内边距
+    12px 14px；行头内联一行：状态圆点 + 名称（14px/500）+ Key 状态小标签
+    （rowTag 同款）+ ↑/↓ + 启停开关 + 旋转 chevron；完整状态摘要（免费模型
+    占比 / 冷却 / 上次探测）挪进卡身「运行状态」字段行，行头不再换行拥挤。
+  - 「模型」卡条目改为宿主 modelEntry 形态——小边框盒 + 网格行
+    （等宽字体模型 id | 名称 · 上下文 | chevron），点击展开「供应商」字段行，
+    逐行列出上游名 + 实际映射模型（等宽字体），替代原先名称/上下文/供应商
+    三行混排的紧凑行列表。
+  - 卡片栈间距对齐模型页 rows（8px）；`.frp-tag` 对齐 rowTag token。
+
+### Tests
+
+- client-integration 第 7 节更新并新增断言（总计 51 项）：行头 Key 标签、
+  运行状态字段行、modelEntry 网格行（role=button + aria-expanded）、
+  供应商 vialist/viarow（上游名 + 映射模型）。
+
+## [0.8.10]
+
+### Changed
+
+- **「免费」面板重排为「设置 → 插件」页同款的可展开卡片**：每家上游一张卡——
+  卡片头（名称 15px/600 + 状态摘要 13px 上下两行 + ↑/↓ 优先级 + 启停开关 +
+  旋转 chevron）点击就地展开卡身（密钥/测试连通/探测模型/申请链接），「模型」
+  与「高级设置」（全局代理 + 远程目录）也是同款卡片；高级设置展开后是字段
+  分组而非嵌套卡。样式逐 token 对齐宿主 PluginCard（`.5px` 边框、圆角 16px、
+  bg-layer-3、hover 描边、开卡 bg-layer-2、chevron 旋转 180°），卡片间距 10px
+  与插件页一致。旧的单外框紧凑行列表（`frp-plist`/`frp-prow`）移除。
+- 可达性：卡片头 `role="button"` + `tabIndex` + `aria-expanded`，Enter/Space
+  就地展开；↑/↓/启停开关 `stopPropagation` 不触发展开。
+- 0.8.9 的「默认 | 免费」页签骨架保持（同样对齐插件页顶部结构：下划线页签、
+  aria 角色、方向键导航、访问过的面板保持挂载）。
+
+### Tests
+
+- client-integration 新增第 7 节（19 断言，总计 48 项）：带状态的 React 替身 +
+  完整 state 全量渲染面板——卡片栈/卡片头结构、点击与键盘展开、chevron 旋转、
+  卡身字段分组、隐藏恢复行；state 未到时形状守卫降级卡不炸设置槽。
+
+## [0.8.9]
+
+### Changed
+
+- **恢复「设置 → 模型」页的页签切换形态**：0.8.8 把面板迁到官方
+  `settings.models.footer` 子插槽、渲染为页面底部的可折叠区块；用户反馈
+  「默认 | 免费」页签切换更自然，本版回到 0.8.7 的交互——标题与介绍保持原位，
+  页签条插在介绍之后（结构对齐「设置 → 插件」页：下划线页签、aria 角色、
+  方向键导航），「免费」页签隐藏内置内容并承载完整面板，访问过的面板保持
+  挂载；插件停止时换回原组件、移除页签条并还原可见性，完全可逆。
+- 官方 footer 子插槽渲染在提供方行与添加区之后（页面底部），给不出「同一
+  内容区切换默认/免费」的语义，页签形态仍需换血内置 models 条目的
+  component + 在内置页 DOM 插自绘页签条。该做法在 dsh 0.1.5-rc.2 上实测可用
+  （renderer/settings 客户端与 0.1.2-rc.1 字节一致），并保持防御性实现：
+  只动自建节点、条目缺失退独立设置页、停止完全还原。
+- 0.8.8 的其余内容不变（视觉模态契约修复、免费模型配置刷新、宿主侧测试）。
+
+### Tests
+
+- `client-integration` 测试随页签架构重写：换血条目（component 替换/还原、
+  幂等、options 保留）、无 models 条目兜底、条目晚出现接管、停止可逆（含
+  停止后不复活）、渲染形态（frp-tabpage + 默认 tabpanel 承载原组件 + 懒挂载）
+  与源码契约（tablist/页签文案/MutationObserver 守护/无反引号）。
+
+## [0.8.8]
+
+兼容目标：dsh 0.1.5-rc.2（同时保持对 0.1.2-rc.1 起的行为兼容）。
+
+### Fixed
+
+- **会话内图片输入此前被宿主拦下/丢弃（0.8.6/0.8.7 的透传从未真正生效）**：
+  适配器对所有模型硬编码回传 `inputModalities: ['text']`。按 dsh-llm 的
+  `LlmModelInfo` 契约，**缺省 = 未知**，而**显式 `['text']` = 负能力**：
+  `resolveModelInfo` 会在入站时直接拒绝附图
+  （`MODEL_DOES_NOT_SUPPORT_IMAGES`），已附图的历史消息还会在派发前被投影成
+  `[image omitted because this model accepts text only; …]`——模型只会「听说」
+  有图。现在只有来源明确声明支持视觉的模型才回传 `['text','image']`，其余
+  一律不写该字段（未知 = 图片原样透传给上游，由 4xx → 候选链自愈）。
+- 视觉能力的三条来源全部接通：内置种子表（`deepseek-v4-flash-vision-exp` /
+  `openrouter/free` / `ling-3.0-flash-vl` / `gemma-4` / `glm-4.6v` 等）、
+  远程与 native 目录（`inputModalities: ['text','image']`、简写 `vision: true`、
+  models.dev 的 `modalities.input`）、上游 `GET /models` 探测
+  （OpenRouter 的 `architecture.input_modalities`、部分网关的 `input_modalities`
+  / `modalities`）。自定义上游 patch 与 `apply-patch` 校验同步支持该字段。
+
+### Changed
+
+- **「设置 → 模型」页集成改用宿主官方子插槽 `settings.models.footer`**
+  （dsh 0.1.x 起提供，0.1.5-rc.2 实测可用）：完整 FreeRoute 面板作为提供方行
+  与「添加」区之后的独立区块渲染，标题行可折叠、默认展开（收起即卸载面板，
+  5s 状态轮询随之停止）。删除了自 0.4 起的 DOM 换血实现——包裹内置 models
+  条目的 `component`、`MutationObserver` 往宿主 DOM 插自绘页签条、隐藏/还原
+  兄弟节点——那套做法依赖 `h2`/`intro` 的 DOM 形状与 React reconciliation 的
+  巧合，宿主一改版就会错位或闪烁。
+- 兜底路径保留：宿主未声明该子槽时（旧 dsh / 未加载模型页插件）宽限 2.5s 后
+  回落到独立 freeroute 设置页；声明晚到时兜底页自动撤销，不会出现两个入口。
+  插件停止时所有注册随 fiber 撤销，完全可逆。
+- devDependency `@deepseek-ai/dsh-typert-protocol` `0.1.2-rc.1` → `0.1.5-rc.2`
+  （对齐宿主；运行时仍优先锚定宿主自带副本）。peer 范围保持
+  `>=0.1.0-rc.6 <0.2.0` 不变。
+
+### 免费模型配置
+
+- OpenCode Zen 种子表按 2026-09-11 live 核对重写：`x-preview-f-free` /
+  `hy3-free` / `laguna-s-2.1-free` 均已下线；现役 7 款 `-free`
+  （`deepseek-v4-flash-free` 为首选，含 `muse-spark-1.3/1.2-contributor-free`、
+  `ling-3.0-flash-fin-free`、`nemotron-3.5-lightning-free`、`nemotron-3-ultra-free`、
+  `mimo-v2.5-free`）。
+- OpenRouter 种子表换成现役免费档（`openrouter/free` 等 8 款，其中 4 款带视觉
+  声明）；旧表里的 `deepseek-chat-v3-0324:free` / `qwen-2.5-72b:free` 等已不再免费。
+- SenseNova 首选模型对齐 `deepseek-v4-flash`；`KNOWN_BASE` 修正为
+  `https://token.sensenova.cn/v1`（`api.sensenova.cn/compatible-mode/v1` 对目录
+  同步与推理均返回 403）。
+- 仓库内备份目录 `freeroute-dynamic/catalog/freeroute-catalog.json` 同步到线上
+  10 家上游的现状（此前停在 6 家 / 2026-08-26），并补上视觉声明。
+
+### Tests
+
+- 新增 `freeroute-dynamic/test/client-integration.mjs`（23 断言，纯 node，无需
+  浏览器）：官方 footer 注册、宽限期兜底、晚到声明接管、停止可逆、DOM 换血
+  已移除的源码契约。已纳入 `npm test`。
+- 宿主集成测试新增第 21 节（16 断言）锁死模态语义：声明视觉 → `['text','image']`，
+  未声明/auto/未知模型 → 不带 `inputModalities`；覆盖内置 patch、native 目录、
+  `vision: true` 简写与 `/models` 探测四条路径。
+- smoke 与集成测试全绿（宿主 199 项 + 客户端 23 项 + smoke 全通过）。
+
+### 发布链
+
+- `package.json` 的 `repository` / `homepage` / `bugs` 由 `0xrushmoon/dsh-freeroute`
+  修正为 `dushaobindoudou/dsh-freeroute`（npm 账号与 tag 触发的发布工作流所在
+  仓库）。此前 provenance 校验按 `repository.url` 比对运行工作流的仓库，二者
+  不一致导致 `npm publish` 以 E422 失败；README 徽章、CONTRIBUTING 克隆地址、
+  discussions 链接、目录 `$schema` 与 OpenRouter 的 `http-referer` 同步对齐。
+
+## [0.8.7]
+
+### Fixed
+
+- **入站 OpenAI wire 多模态丢图**（0.8.6 修的是出站腿，本次补上入站腿）：
+  `inboundToInternal` 的 user 分支此前用 `strContent` 只抽文本——客户端以
+  OpenAI 多模态形态（`content:[{type:'text'},{type:'image_url',…}]`）发来的
+  图片部件在入站归一化时被**静默剥掉**，模型只会「听说」有图（实测三种
+  视觉模型全部回复「没有看到图片」）。现在 `image_url` 部件转成 dsh 原生
+  image 块（data URL → `data`+`mimeType`；http(s) → `url`），交由 0.8.6
+  已修好的 transport 出站腿透传；file:/ 空部件按既有约定静默丢弃；纯文本
+  入站（字符串 content）路径不回归。
+- smoke：升级伪 `webServer` 为捕获式，挂载真实 `routeHandler` 到本地端口，
+  新增「■ 4d 入站多模态」用例——OpenAI wire 带图请求必须以
+  `image_url` 部件到达 mock 上游（text+image 次序与内容逐字段断言），
+  并断言纯文本入站不回归。
+
+## [0.8.6]
+
+### Added
+
+- **图片（视觉）内容透传**：`transport.js` 不再对 `type:'image'` 块抛
+  `UNSUPPORTED_CONTENT` 硬错误。dsh 原生图片块（`data`+`mimeType` 或 `url`）
+  与 OpenAI 原生 `image_url` 部件统一归一化后，以标准多模态部件数组
+  （`[{type:'text',…},{type:'image_url',image_url:{url}}]`）发往上游；
+  纯图片消息不虚构 text 部件；无法解析的图片块（file://、空块）静默丢弃
+  而不是毒化整个请求。不识图的模型会由上游以 4xx 明确拒绝并进入既有的
+  wireError/熔断分类——把「是否支持视觉」交还给路由与模型本身。
+- smoke：新增出站请求体捕获，断言图片以 `image_url` 部件到达 mock 上游
+  （取代旧的「本地拒绝图片」断言）。
+
+## [0.8.5]
+
+### Changed
+
+- 兼容 dsh 0.1.2-rc.1：移除 4 个已废弃的 client peerDependencies
+  （`@deepseek-ai/dsh-client-web-react` / `dsh-client-ui-primitives` /
+  `dsh-client-ui-slots` / `dsh-client-runtime`——旧版 client 栈包名，新版
+  dsh 运行时已由 `dsh-client-modules` / `dsh-cordis-client-runner` /
+  `dsh-client-ui-renderer` 取代，且本插件构建产物从未 import 它们，仅产生
+  安装告警并可能误导解析）。保留 `react`（optional，运行时基线模块）与
+  `@deepseek-ai/dsh-typert-protocol`（强制，Typert Remote RPC 契约）。
+- devDependency `@deepseek-ai/dsh-typert-protocol` 对齐宿主版本
+  `0.1.0-rc.6` → `0.1.2-rc.1`（运行时本就锚定宿主副本，此举让 smoke 测试
+  与线上 wire 协议同源）。
+
 ## [0.8.4]
 
 ### Fixed
