@@ -4,7 +4,7 @@
 
 [![npm version](https://img.shields.io/npm/v/dsh-freeroute.svg?style=flat-square)](https://www.npmjs.com/package/dsh-freeroute)
 [![License](https://img.shields.io/npm/l/dsh-freeroute.svg?style=flat-square)](LICENSE)
-[![CI](https://img.shields.io/github/actions/workflow/status/0xrushmoon/dsh-freeroute/ci.yml?branch=main&style=flat-square&label=ci)](https://github.com/0xrushmoon/dsh-freeroute/actions/workflows/ci.yml)
+[![CI](https://img.shields.io/github/actions/workflow/status/dushaobindoudou/dsh-freeroute/ci.yml?branch=main&style=flat-square&label=ci)](https://github.com/dushaobindoudou/dsh-freeroute/actions/workflows/ci.yml)
 
 Free-tier model aggregation for the
 [DeepSeek Harness](https://www.npmjs.com/package/@deepseek-ai/dsh) (dsh):
@@ -43,13 +43,15 @@ token reaches your session**. A local OpenAI-compatible endpoint is included.
    credentials service, never in plaintext config.
 3. **Health & failover** — failures cool down by class (auth/config 10 min,
    rate limit 60 s, others exponential backoff capped at 10 min). `auto`
-   picks the highest-priority enabled, keyed, non-cooling upstream; failures
-   before any output switch to the next candidate (empty responses included),
-   failures after output surface to the caller. A **pinned single model**
-   degrades to the `auto` chain when all of its providers fail (or sit in
-   cooldown) instead of aborting the turn — picking one model is a
-   preference, not exclusivity. Keys rotate individually on
-   AUTH / rate-limit, and a per-key failure is surfaced in the panel.
+   ranks candidates in five layers: anchor model (highest declared `quality`,
+   then the model shared by the most upstreams) → the same model on other
+   vendors → other models of the same quality band with no window downgrade →
+   models that fit the current context → everything else (sunk, never
+   dropped). A **pinned single model** degrades to the `auto` chain when all
+   of its providers fail (or sit in cooldown) instead of aborting the turn —
+   picking one model is a preference, not exclusivity. Keys rotate
+   individually on AUTH / rate-limit, and a per-key failure is surfaced in the
+   panel.
 4. **Three-layer config** — builtin catalog → remote catalog (JSON hosted on
    Cloudflare Pages/R2 for ship-free updates; native format or models.dev
    `api.json`, zero-cost models auto-filtered) → user patch persisted under
@@ -73,11 +75,12 @@ the intro (structure mirrors the Settings -> 插件 page: underline tabs, ARIA
 roles, arrow-key navigation, visited panels stay mounted):
 
 - **默认** keeps the stock model settings untouched;
-- **免费** hosts the full freeroute panel: per-upstream cards (enable /
-  priority / signup tutorial / key save / connectivity test / health & stats),
-  a one-click integration wizard, remote-catalog configuration, and a
-  custom-upstream form (works with local uni-api / new-api / LiteLLM gateways).
-  Non-standard gateways are supported in the config file via `custom.chatPath`
+- **免费** hosts the full freeroute panel in the same shape as the Plugins
+  settings page — one expandable card per upstream (header: name, status
+  summary, priority controls, enable toggle; click to expand keys /
+  connectivity test / model probe / signup links), with Models and Advanced
+  (global proxy + remote catalog) as cards of the same form. Non-standard
+  gateways are supported in the config file via `custom.chatPath`
   (override `/chat/completions`) and `custom.requestExtra` (extra scalar body
   fields; `model: null` omits the model field — e.g. GMI's `/autoroute`).
 

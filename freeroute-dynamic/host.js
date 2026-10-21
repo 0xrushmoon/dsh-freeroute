@@ -1,4 +1,4 @@
-const VERSION = '0.8.4'
+const VERSION = '0.9.0'
 const ROUTE = 'freeroute'
 const NS = 'free-proxy'
 const UA = 'deepseek-harness/0.1.0-rc.6 (+https://github.com/deepseek-ai/deepseek-harness)'
@@ -6,42 +6,51 @@ const TRAILER = '\n__FREEROUTE_HTTP_%{http_code}__'
 
 // 内置三上游：目录默认收录各家免费模型；配好 Key 后插件还会探测
 // GET <baseUrl>/models 合并出完整可用模型列表（见 probeModels）。
+// 种子表口径：2026-09-11 live 核对（GET /models 公开可探，无需 Key）。
+// 探测（目录即真相）+ 模型级失败转移会自动绕开瞬时不可用，这里只影响
+// 首探前的种子与首选拍序。
+//
+// quality（可选 1..5）是 auto 路由的第一排序键：插件只能观测成功/失败/延迟，
+// 观测不到「答案好不好」，所以模型强弱必须由目录显式声明。口径：
+//   5 旗舰（前沿推理/编码主力）  4 强（大参数非旗舰）
+//   3 中（正式版通用款）        2 轻（lite / mini / flash-lite / stealth 预览）
+//   1 小或实验（无稳定性承诺）
+// 不标注 = 未声明（0）→ 排序退回「交集家数 → 窗口 → 原有优先级」，行为不变。
 const BUILTIN_UPSTREAMS = [
   {
     id: 'opencode', name: 'OpenCode Zen',
     baseUrl: 'https://opencode.ai/zen/v1', keyRef: 'FREEROUTE_OPENCODE_API_KEY',
     signupUrl: 'https://opencode.ai/zen',
-    note: '模型列表公开可探测（无需 Key）；“-free”后缀模型免费。',
-    // 默认序为 2026-08-25 实测稳定性排序：x-preview-f-free / hy3-free 多轮
-    // 全程稳定；mimo-v2.5-free 快但免费额度易打满（FreeUsageLimit）；
-    // nemotron 系间歇 503/400；deepseek-v4-flash-free / laguna-s-2.1-free 当时
-    // 上游不可用；muse-spark 有地区限制（403）。探测（目录即真相）+ 模型级
-    // 失败转移会自动绕开瞬时不可用，这里只影响首选拍序。
-    defaultModel: 'x-preview-f-free',
+    note: '模型列表公开可探测（无需 Key）；“-free”后缀模型免费。2026-09-16 晚间复查：免费档启用客户端围栏，API 直调被拒，暂从免费路由退出。',
+    // 2026-09-16 晚间复查：union-alpha（stealth 预览）上新；免费档启用客户
+    // 端围栏——API 直调无论是否带 Key 均报 FreeTierError「free tier can only
+    // be used from within OpenCode」，7 款 -free 暂无法从第三方工具调用。
+    // （09-11 口径：mimo-v2.5-free 快但额度易打满；muse-spark 贡献者档并发紧。）
+    defaultModel: 'union-alpha',
+    freeModels: [],
     models: [
-      { id: 'x-preview-f-free', name: 'X Preview (free)', contextWindow: 131072 },
-      { id: 'hy3-free', name: 'Hunyuan 3 (free)', contextWindow: 131072 },
-      { id: 'mimo-v2.5-free', name: 'MiMo v2.5 (free)', contextWindow: 131072 },
-      { id: 'nemotron-3.5-lightning-free', name: 'Nemotron 3.5 Lightning (free)', contextWindow: 131072 },
-      { id: 'nemotron-3-ultra-free', name: 'Nemotron 3 Ultra (free)', contextWindow: 131072 },
-      { id: 'deepseek-v4-flash-free', name: 'DeepSeek V4 Flash (free)', contextWindow: 131072 },
-      { id: 'laguna-s-2.1-free', name: 'Laguna S 2.1 (free)', contextWindow: 131072 },
-      { id: 'muse-spark-1.2-contributor-free', name: 'Muse Spark 1.2 Contributor (free)', contextWindow: 131072 }
+      { id: 'union-alpha', name: 'Union Alpha (stealth preview)', contextWindow: 262144, quality: 3 },
+      { id: 'deepseek-v4-flash-free', name: 'DeepSeek V4 Flash (free)', contextWindow: 131072, quality: 3 },
+      { id: 'muse-spark-1.3-contributor-free', name: 'Muse Spark 1.3 Contributor (free)', contextWindow: 131072, quality: 2 },
+      { id: 'muse-spark-1.2-contributor-free', name: 'Muse Spark 1.2 Contributor (free)', contextWindow: 131072, quality: 2 },
+      { id: 'mimo-v2.5-free', name: 'MiMo v2.5 (free)', contextWindow: 131072, quality: 2 },
+      { id: 'ling-3.0-flash-fin-free', name: 'Ling 3.0 Flash Fin (free)', contextWindow: 131072, quality: 2 },
+      { id: 'nemotron-3.5-lightning-free', name: 'Nemotron 3.5 Lightning (free)', contextWindow: 131072, quality: 2 },
+      { id: 'nemotron-3-ultra-free', name: 'Nemotron 3 Ultra (free)', contextWindow: 131072, quality: 3 }
     ]
   },
   {
     id: 'b-ai', name: 'B.AI',
     baseUrl: 'https://api.b.ai/v1', keyRef: 'FREEROUTE_BAI_API_KEY',
     signupUrl: 'https://chat.b.ai/chat?invite_code=2PLTB4',
-    note: '注册送额度，4 个免费模型无需充值；大陆网络通常需 HTTP 代理（上游可配 proxy 字段）。',
-    defaultModel: 'deepseek-v4-flash',
-    // 这批模型名不含 “free”，用 freeModels 显式声明（服务端目录可随时改）
-    freeModels: ['deepseek-v4-flash', 'deepseek-v4-flash-vision-exp', 'hy3', 'mimo-v2.5'],
+    note: '注册送额度；大陆网络通常需 HTTP 代理（上游可配 proxy 字段）。2026-09-16 复查：deepseek-v4-flash / vision-exp 已从 /models 下线；零余额账户实测全模型 insufficient_user_quota——免费档失效，暂从免费路由退出。',
+    defaultModel: 'hy3',
+    // 2026-09-16 live：免费档失效（零余额全模型 insufficient_user_quota），
+    // freeModels 置空；hy3 / mimo-v2.5 仍在 /models 在列，充值后可用。
+    freeModels: [],
     models: [
-      { id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash', contextWindow: 131072 },
-      { id: 'deepseek-v4-flash-vision-exp', name: 'DeepSeek V4 Flash Vision Exp', contextWindow: 131072 },
-      { id: 'hy3', name: 'Hunyuan 3', contextWindow: 131072 },
-      { id: 'mimo-v2.5', name: 'MiMo v2.5', contextWindow: 131072 }
+      { id: 'hy3', name: 'Hunyuan 3', contextWindow: 131072, quality: 3 },
+      { id: 'mimo-v2.5', name: 'MiMo v2.5', contextWindow: 131072, quality: 2 }
     ]
   },
   {
@@ -49,26 +58,36 @@ const BUILTIN_UPSTREAMS = [
     baseUrl: 'https://openrouter.ai/api/v1', keyRef: 'FREEROUTE_OPENROUTER_API_KEY',
     signupUrl: 'https://openrouter.ai/settings/keys',
     note: '聚合网关，“:free”后缀模型免费；未充值账户约 50 次/天。',
-    defaultModel: 'deepseek/deepseek-chat-v3-0324:free',
+    // 2026-09-11 live 免费档种子（GET /models 公开免鉴权，探到即覆盖）：
+    // 视觉模型带 inputModalities，供 dsh 放行图片输入；其余不声明（未知），
+    // 图片原样透传由上游裁决。
+    defaultModel: 'openrouter/free',
+    // stealth/union-alpha 不带 :free 后缀但 $0 计费（2026-09-16 实测出字
+    // cost:0，262k 视觉，不占 :free 日额），用 freeModels 显式声明免费。
+    freeModels: ['stealth/union-alpha'],
     models: [
-      { id: 'deepseek/deepseek-chat-v3-0324:free', name: 'DeepSeek V3 (free)', contextWindow: 163840 },
-      { id: 'deepseek/deepseek-r1:free', name: 'DeepSeek R1 (free)', contextWindow: 163840 },
-      { id: 'meta-llama/llama-3.3-70b-instruct:free', name: 'Llama 3.3 70B (free)', contextWindow: 131072 },
-      { id: 'google/gemini-2.0-flash-exp:free', name: 'Gemini 2.0 Flash Exp (free)', contextWindow: 1048576 },
-      { id: 'qwen/qwen-2.5-72b-instruct:free', name: 'Qwen2.5 72B (free)', contextWindow: 32768 }
+      { id: 'openrouter/free', name: 'OpenRouter Free Router', contextWindow: 200000, quality: 3, inputModalities: ['text', 'image'] },
+      { id: 'stealth/union-alpha', name: 'Stealth: Union Alpha (free)', contextWindow: 262144, quality: 3, inputModalities: ['text', 'image'] },
+      { id: 'inclusionai/ling-3.0-flash-vl:free', name: 'Ling 3.0 Flash VL (free)', contextWindow: 262144, quality: 2, inputModalities: ['text', 'image'] },
+      { id: 'google/gemma-4-31b-it:free', name: 'Gemma 4 31B (free)', contextWindow: 262144, quality: 2, inputModalities: ['text', 'image'] },
+      { id: 'dots-studio/dots-3-note-preview:free', name: 'dots-3 Note Preview (free)', contextWindow: 512000, quality: 2, inputModalities: ['text', 'image'] },
+      { id: 'nvidia/nemotron-3-super-120b-a12b:free', name: 'Nemotron 3 Super 120B (free)', contextWindow: 262144, quality: 3 },
+      { id: 'nvidia/nemotron-3.5-lightning:free', name: 'Nemotron 3.5 Lightning (free)', contextWindow: 1000000, quality: 2 },
+      { id: 'cohere/north-mini-code:free', name: 'North Mini Code (free)', contextWindow: 256000, quality: 2 },
+      { id: 'poolside/laguna-s-2.1:free', name: 'Laguna S 2.1 (free)', contextWindow: 262144, quality: 3 }
     ]
   },
   {
     id: 'sensenova', name: 'SenseNova 商汤日日新',
     baseUrl: 'https://token.sensenova.cn/v1', keyRef: 'FREEROUTE_SENSENOVA_API_KEY',
     signupUrl: 'https://console.sensenova.cn',
-    note: 'OpenAI 兼容端点（token.sensenova.cn）。6.7/6.8-flash-lite 与 deepseek-v4-flash 实测免费；目录中的 u1 系列实际 404。',
-    defaultModel: 'sensenova-6.8-flash-lite',
+    note: 'OpenAI 兼容端点（token.sensenova.cn；api.sensenova.cn 会 403）。3 款实测免费；官方无 /models 列表，种子表即真相。',
+    defaultModel: 'deepseek-v4-flash',
     freeModels: ['sensenova-6.8-flash-lite', 'sensenova-6.7-flash-lite', 'deepseek-v4-flash'],
     models: [
-      { id: 'sensenova-6.8-flash-lite', name: 'SenseNova 6.8 Flash Lite', contextWindow: 262144 },
-      { id: 'sensenova-6.7-flash-lite', name: 'SenseNova 6.7 Flash Lite', contextWindow: 262144 },
-      { id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash', contextWindow: 1048576 }
+      { id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash', contextWindow: 1048576, quality: 3 },
+      { id: 'sensenova-6.8-flash-lite', name: 'SenseNova 6.8 Flash Lite', contextWindow: 262144, quality: 2 },
+      { id: 'sensenova-6.7-flash-lite', name: 'SenseNova 6.7 Flash Lite', contextWindow: 262144, quality: 2 }
     ]
   }
 ]
@@ -76,13 +95,15 @@ const BUILTIN_UPSTREAMS = [
 const TUTORIALS = {
   opencode: ['打开 opencode.ai/zen 注册/登录（支持 GitHub 登录）', '在 Zen 页面生成 API Key', '复制密钥粘贴到上方输入框保存', '带 -free 后缀的模型免费；其余为探测到的付费可用模型'],
   openrouter: ['打开 openrouter.ai 注册/登录（支持 GitHub 登录）', '进入 Settings → Keys，点 Create Key', '复制密钥（sk-or-v1-…）粘贴到上方输入框保存', '选 id 带 :free 的模型即免费；未充值约 50 次/天，用完自动切其他上游'],
-  'b-ai': ['打开 chat.b.ai 注册/登录（点面板上的邀请链接注册，双方各得额度）', '在个人设置 / API 页面生成 API Key', '复制密钥粘贴到上方输入框保存', 'deepseek-v4-flash / hy3 / mimo-v2.5 等 4 个模型免费可用；大陆网络通常需在配置里给该上游设 proxy'],
-  sensenova: ['打开 console.sensenova.cn 注册（商汤日日新）', '进入 API Key 管理创建密钥', '复制密钥粘贴到上方输入框保存', 'sensenova-6.8/6.7-flash-lite 与 deepseek-v4-flash 实测免费；glm-5.2 需工作区配额，u1 系列不可用']
+  'b-ai': ['打开 chat.b.ai 注册/登录（点面板上的邀请链接注册，双方各得额度）', '在个人设置 / API 页面生成 API Key', '复制密钥粘贴到上方输入框保存', 'hy3 / mimo-v2.5 在列（2026-09-16 复查免费档失效，充值后可用）；大陆网络通常需在配置里给该上游设 proxy'],
+  sensenova: ['打开 console.sensenova.cn 注册（商汤日日新）', '进入 API Key 管理创建密钥', '复制密钥粘贴到上方输入框保存', 'deepseek-v4-flash 与 sensenova-6.8/6.7-flash-lite 实测免费（2026-09-11）；glm-5.2 需工作区配额，u1 系列不可用']
 }
 
 const KNOWN_BASE = {
   opencode: 'https://opencode.ai/zen/v1',
-  sensenova: 'https://api.sensenova.cn/compatible-mode/v1',
+  // token.sensenova.cn 是官方 OpenAI 兼容端点；api.sensenova.cn/compatible-mode
+  // 对目录同步与推理均返回 403（2026-09-09 复核），旧值会静默换不来模型。
+  sensenova: 'https://token.sensenova.cn/v1',
   openrouter: 'https://openrouter.ai/api/v1',
   groq: 'https://api.groq.com/openai/v1',
   google: 'https://generativelanguage.googleapis.com/v1beta/openai',
@@ -149,7 +170,15 @@ function sanitizeConfig(raw) {
           const ms = []
           for (const m of c.models) {
             if (m && typeof m.id === 'string' && m.id.length > 0) {
-              ms.push({ id: m.id, name: (typeof m.name === 'string' && m.name.length > 0) ? m.name : m.id, contextWindow: Number(m.contextWindow) > 0 ? Number(m.contextWindow) : 32768 })
+              const mm = { id: m.id, name: (typeof m.name === 'string' && m.name.length > 0) ? m.name : m.id, contextWindow: Number(m.contextWindow) > 0 ? Number(m.contextWindow) : 32768 }
+              // 质量档（1..5）：auto 分层的第一排序键。插件自身判断不了模型好坏，
+              // 只能由目录/用户显式声明；sanitize 必须放行，否则用户 patch 里写
+              // 的 quality 会被静默丢掉（表现为「配了没生效」）。
+              const q = Math.round(Number(m.quality))
+              if (q >= 1 && q <= 5) mm.quality = q
+              const im = catalogModelModalities(m)
+              if (im) mm.inputModalities = im
+              ms.push(mm)
             }
           }
           if (ms.length > 0) cu.models = ms
@@ -216,6 +245,23 @@ function pickModelIds(v) {
   return out
 }
 
+// 模型级输入模态声明（目录可选字段）：
+//   inputModalities: ['text','image']  或简写  vision: true
+// dsh 的 LlmModelInfo 契约里「缺省 = 未知，显式缺 image = 负能力」——未知时
+// 图片原样透传给上游裁决（与本插件「是否支持视觉交给路由与模型本身」一致），
+// 显式 ['text'] 则会让宿主直接拒绝用户附图（MODEL_DOES_NOT_SUPPORT_IMAGES）。
+function catalogModelModalities(m) {
+  if (m.vision === true || m.supportsVision === true) return ['text', 'image']
+  let src = null
+  if (Array.isArray(m.inputModalities)) src = m.inputModalities
+  else if (m.modalities && Array.isArray(m.modalities.input)) src = m.modalities.input
+  if (!src) return null
+  for (const x of src) {
+    if (String(x).toLowerCase() === 'image') return ['text', 'image']
+  }
+  return null
+}
+
 function normalizeCatalogEntry(e) {
   if (!e || typeof e !== 'object') return null
   const api = (typeof e.api === 'string' && e.api.length > 0) ? e.api : (typeof e.baseUrl === 'string' ? e.baseUrl : '')
@@ -231,7 +277,12 @@ function normalizeCatalogEntry(e) {
   const raw = Array.isArray(e.models) ? e.models : []
   for (const m of raw) {
     if (m && typeof m.id === 'string' && m.id.length > 0) {
-      models.push({ id: m.id, name: (typeof m.name === 'string' && m.name.length > 0) ? m.name : m.id, contextWindow: Number(m.contextWindow) > 0 ? Number(m.contextWindow) : 32768 })
+      const entry = { id: m.id, name: (typeof m.name === 'string' && m.name.length > 0) ? m.name : m.id, contextWindow: Number(m.contextWindow) > 0 ? Number(m.contextWindow) : 32768 }
+      const q = Math.round(Number(m.quality))
+      if (q >= 1 && q <= 5) entry.quality = q
+      const im = catalogModelModalities(m)
+      if (im) entry.inputModalities = im
+      models.push(entry)
     }
   }
   models.sort(function (a, b) { return b.contextWindow - a.contextWindow })
@@ -282,7 +333,10 @@ function parseModelsDev(d) {
       const c = (m && m.cost) || {}
       if (Number(c.input) === 0 && Number(c.output) === 0) {
         const ctx = (m && m.limit && Number(m.limit.context) > 0) ? Number(m.limit.context) : 32768
-        free.push({ id: mid, name: (m && typeof m.name === 'string' && m.name.length > 0) ? m.name : mid, contextWindow: ctx })
+        const entry = { id: mid, name: (m && typeof m.name === 'string' && m.name.length > 0) ? m.name : mid, contextWindow: ctx }
+        const im = m ? catalogModelModalities(m) : null
+        if (im) entry.inputModalities = im
+        free.push(entry)
       }
     }
     if (free.length === 0) continue
@@ -671,6 +725,21 @@ function log (message) {
       return ring.length > 0 ? ring[0].key : ''
     }
 
+    // 上游 /models 自带模态时采信（OpenRouter: architecture.input_modalities；
+    // 部分网关: input_modalities / modalities）。只做正面声明（image），不反向
+    // 声明纯文本——dsh 契约里显式 ['text'] 会直接拒绝用户附图。
+    function probeModelModalities(m) {
+      let src = null
+      if (Array.isArray(m.input_modalities)) src = m.input_modalities
+      else if (m.architecture && Array.isArray(m.architecture.input_modalities)) src = m.architecture.input_modalities
+      else if (Array.isArray(m.modalities)) src = m.modalities
+      if (!src) return null
+      for (const x of src) {
+        if (String(x).toLowerCase() === 'image') return ['text', 'image']
+      }
+      return null
+    }
+
     async function probeModels(u, force) {
       const cached = probeCache.get(u.id)
       if (!force && cached && Date.now() - cached.at < 1800000) return cached
@@ -702,6 +771,8 @@ function log (message) {
             contextWindow: cw > 0 ? cw : 0,
             free: isFreeModelId(id) || declaredSet.has(id)
           }
+          const im = probeModelModalities(m)
+          if (im) entry.inputModalities = im
           if (entry.free) free.push(entry)
           else paid.push(entry)
         }
@@ -714,22 +785,54 @@ function log (message) {
       return result
     }
 
+    // 输入模态：只有来源显式声明「支持图片」才回传 inputModalities。
+    // dsh 的契约是「缺省 = 未知」，未知时图片原样交给上游裁决；早期版本一律
+    // 回传 ['text'] 属于显式负能力，会让宿主在会话里直接拒绝附图
+    // （MODEL_DOES_NOT_SUPPORT_IMAGES），并把已附图的消息投影成
+    // "[image omitted because this model accepts text only]"。
+    function withModalities(info, m) {
+      if (m && Array.isArray(m.inputModalities) && m.inputModalities.indexOf('image') >= 0) {
+        info.inputModalities = ['text', 'image']
+      }
+      return info
+    }
+
     function mergedModels(u) {
       // 目录即真相：探测拿到过列表就只用探测结果（免费模型轮换频繁，固定
       // 列表必然腐化）；静态表只作无 /models 端点（如 SenseNova）或首探前
       // 的种子。探测每 10 分钟强刷 + 失败触发重探，见 scheduleReprobe/probeAll。
       const probe = probeCache.get(u.id)
       if (probe && probe.models.length > 0) {
-        return applyFreeModels(probe.models.slice(), u)
+        return applyDeclaredQuality(applyFreeModels(probe.models.slice(), u), u)
       }
       const out = []
       const seen = {}
       for (const m of (u.models || [])) {
         if (seen[m.id]) continue
         seen[m.id] = true
-        out.push({ id: m.id, name: m.name || m.id, contextWindow: m.contextWindow || 32768, free: isFreeModelId(m.id) })
+        const e = { id: m.id, name: m.name || m.id, contextWindow: m.contextWindow || 32768, free: isFreeModelId(m.id) }
+        if (Number(m.quality) > 0) e.quality = Number(m.quality)
+        withModalities(e, m)
+        out.push(e)
       }
-      return applyFreeModels(out, u)
+      return applyDeclaredQuality(applyFreeModels(out, u), u)
+    }
+
+    // 质量档（1..5，数字越大越强）只能由目录/用户配置声明：插件能观测成功、
+    // 失败、延迟，但观测不到「答得好不好」，无法自行判断模型强弱。
+    // 探测结果会整表替换静态表（目录即真相），所以声明值必须在这里按 canonical
+    // 名重新贴回探测列表——否则一旦某家 /models 探通，内置/目录里的质量档就全丢。
+    function applyDeclaredQuality(list, u) {
+      const declared = new Map()
+      for (const m of (u.models || [])) {
+        if (Number(m.quality) > 0) declared.set(canonicalModelId(m.id), Number(m.quality))
+      }
+      if (declared.size === 0) return list
+      for (const m of list) {
+        const q = declared.get(canonicalModelId(m.id))
+        if (q) m.quality = q
+      }
+      return list
     }
 
     // 声明式免费标记：模型名不含 “free” 时（如 B.AI 的 hy3 / mimo-v2.5），
@@ -801,6 +904,7 @@ function log (message) {
           if (m.free === true) entry.free = true
           if (!entry.contextWindow && m.contextWindow) entry.contextWindow = m.contextWindow
           if (!entry.name && m.name && m.name !== m.id) entry.name = m.name
+          if (Array.isArray(m.inputModalities) && m.inputModalities.indexOf('image') >= 0) entry.inputModalities = ['text', 'image']
           if (!entry.via.some(function (v) { return v.upstream === u.id && v.model === m.id })) {
             entry.via.push({ upstream: u.id, model: m.id })
           }
@@ -912,11 +1016,20 @@ function log (message) {
       return Array.isArray(content) ? content : []
     }
 
+    // 一张图片块 → 可发往上游的 URL。dsh 原生块携带 base64（data + mimeType），
+    // OpenAI 原生 image_url 部件则直接带 url（data: 或 https:）。两者都放行；
+    // 其余形态（file://、空块）返回 null 被静默丢弃而不是毒化请求。
+    function imagePartUrl(block) {
+      if (typeof block.url === 'string' && block.url.length > 0) return block.url
+      const mime = typeof block.mimeType === 'string' && block.mimeType.length > 0 ? block.mimeType : 'image/png'
+      if (typeof block.data === 'string' && block.data.length > 0) return 'data:' + mime + ';base64,' + block.data
+      return null
+    }
+
     function serializeMessages(messages) {
       const wire = []
       for (const m of messages || []) {
         const blocks = contentBlocks(m.content)
-        for (const b of blocks) { if (b && b.type === 'image') throw mkFail('FreeRoute 免费路由暂不支持图片内容', 'UNSUPPORTED_CONTENT') }
         if (m.role === 'system') { wire.push({ role: 'system', content: flattenText(blocks) }); continue }
         if (m.role === 'assistant') {
           const toolCalls = []
@@ -929,9 +1042,31 @@ function log (message) {
           continue
         }
         const toolResults = []
-        for (const b of blocks) { if (b && b.type === 'tool-result') toolResults.push(b) }
+        const imageUrls = []
+        for (const b of blocks) {
+          if (!b || typeof b !== 'object') continue
+          if (b.type === 'tool-result') { toolResults.push(b); continue }
+          if (b.type === 'image') {
+            const url = imagePartUrl(b)
+            if (url !== null) imageUrls.push(url)
+            continue
+          }
+          if (b.type === 'image_url' && b.image_url && typeof b.image_url.url === 'string') {
+            if (b.image_url.url.length > 0) imageUrls.push(b.image_url.url)
+          }
+        }
         const text = flattenText(blocks)
-        if (text.length > 0 || toolResults.length === 0) wire.push({ role: 'user', content: text })
+        if (imageUrls.length > 0) {
+          // 视觉上游走标准 OpenAI 多模态形态：text + image_url 部件。
+          // 不识别图片的模型会由上游以 4xx 明确拒绝，进入既有的
+          // wireError/熔断分类，而不是在这里全量禁图。
+          const parts = []
+          if (text.length > 0) parts.push({ type: 'text', text: text })
+          for (const url of imageUrls) parts.push({ type: 'image_url', image_url: { url: url } })
+          wire.push({ role: 'user', content: parts })
+        } else if (text.length > 0 || toolResults.length === 0) {
+          wire.push({ role: 'user', content: text })
+        }
         for (const r of toolResults) wire.push({ role: 'tool', tool_call_id: r.toolCallId, content: flattenText(r.content) || '(no output)' })
       }
       return wire
@@ -1187,7 +1322,7 @@ function log (message) {
         if (key) argv.push('-H', 'authorization: Bearer ' + key)
         argv.push(
           '-H', 'user-agent: ' + UA,
-          '-H', 'http-referer: https://github.com/0xrushmoon/dsh-freeroute',
+          '-H', 'http-referer: https://github.com/dushaobindoudou/dsh-freeroute',
           '-H', 'x-title: dsh-freeroute',
           '--data-binary', '@-', '-w', TRAILER)
         try {
@@ -1287,33 +1422,8 @@ function log (message) {
     const REQUEST_MAX_SECONDS = 600
 
     function candidatesSync(pool, model) {
-      if (model === 'auto') {
-        // 同模型跨厂商优先：A/B 都提供 DeepSeek-3.5-flash 时，先在提供同款
-        // 模型的厂商之间轮换，全部不可用才轮到其他模型。
-        const out = []
-        const seen = {}
-        const push = function (u, mid) {
-          const k = u.id + '|' + mid
-          if (seen[k]) return
-          if (!mergedModels(u).some(function (m) { return m.id === mid })) return
-          seen[k] = true
-          out.push({ upstream: u, model: mid })
-        }
-        if (pool.length > 0) {
-          const primary = defaultModelFor(pool[0])
-          if (primary) {
-            const gen = canonicalModelId(primary)
-            for (const u of pool) {
-              const mm = mergedModels(u).find(function (x) { return canonicalModelId(x.id) === gen })
-              if (mm) push(u, mm.id)
-            }
-          }
-        }
-        for (const u of pool) {
-          for (const mid of modelCandidatesFor(u)) push(u, mid)
-        }
-        return out
-      }
+      // auto 走 autoChain（质量/交集/容量三层排序），不在这里处理——本函数只
+      // 负责「点名某个模型」的派发顺序：同 id 优先，其次提供该模型的其他上游。
       const slash = model.indexOf('/')
       if (slash > 0) {
         const pid = model.slice(0, slash)
@@ -1346,6 +1456,185 @@ function log (message) {
         }
       } catch (e) { }
       return 0
+    }
+
+    // ---- auto 候选链：质量 / 交集 / 容量 三层排序 ----
+    // 判断依据按优先级从高到低：
+    //   ① quality —— 目录声明的质量档（1..5）。插件只能观测成功/失败/延迟，
+    //      观测不到「答得好不好」，所以模型强弱必须由目录显式声明；
+    //   ② coverage —— 同一款模型被多少家上游同时提供（交集家数）。交集越大，
+    //      「同款模型跨厂商」这条零损耗的故障转移链越深：免费池天天限流，
+    //      一个 5 家都在的模型比一个只有 1 家的小众预览款可靠得多；
+    //   ③ window —— 上下文容量。只用来兜住「别把当前会话塞进放不下的模型」，
+    //      不再拿它当「最好」的判据（窗口大 ≠ 能力强，1M 窗口的 lite 款
+    //      在工具调用密集的场景里比 128K 的正式版差得多）。
+    // 三者都分不出高下时保持原首选（池首上游的默认模型）——只有严格更优才
+    // 替换，所以未声明 quality 的既有配置行为不变。
+
+    // 本次请求的上下文占用粗估（token）。只用于分层排序，不做硬校验：
+    // CJK 约 1.6 字符/token，其余约 3.5 字符/token，末尾加响应预留与 10% 余量。
+    function estimateContextTokens(options) {
+      if (!options) return 0
+      let cjk = 0
+      let other = 0
+      const addStr = function (s) {
+        for (let i = 0; i < s.length; i++) {
+          if (s.charCodeAt(i) > 0x2e80) cjk++
+          else other++
+        }
+      }
+      const addBlocks = function (blocks) {
+        if (typeof blocks === 'string') { addStr(blocks); return }
+        if (!Array.isArray(blocks)) return
+        for (const b of blocks) {
+          if (!b || typeof b !== 'object') continue
+          if (typeof b.text === 'string') addStr(b.text)
+          if (typeof b.arguments === 'string') addStr(b.arguments)
+          if (typeof b.content === 'string') addStr(b.content)
+          else if (Array.isArray(b.content)) addBlocks(b.content)
+          if (b.type === 'image' || b.type === 'image_url') other += 1024
+        }
+      }
+      if (typeof options.system === 'string') addStr(options.system)
+      for (const m of (options.messages || [])) addBlocks(m && m.content)
+      if (Array.isArray(options.tools) && options.tools.length > 0) addStr(JSON.stringify(options.tools))
+      const tokens = cjk / 1.6 + other / 3.5
+      if (!(tokens > 0)) return 0
+      const reserve = Number(options.maxTokens) > 0 ? Math.min(Number(options.maxTokens), 8192) : 4096
+      return Math.ceil(tokens * 1.1) + reserve
+    }
+
+    // 一家上游可参与 auto 的模型：默认模型 + 全部免费模型（去重，顺序即优先）。
+    // 只算免费款是刻意的——auto 的承诺是「免费额度内自动切换」，付费模型只在
+    // 被点名（freeroute/<id> 或通用名）时才派发。
+    function eligibleModels(u) {
+      const out = []
+      const seen = {}
+      const def = defaultModelFor(u)
+      const list = mergedModels(u)
+      const push = function (m) {
+        if (!m || !m.id || seen[m.id]) return
+        seen[m.id] = true
+        out.push(m)
+      }
+      for (const m of list) { if (m.id === def) push(m) }
+      for (const m of list) { if (m.free === true) push(m) }
+      return out
+    }
+
+    // 池内按 canonical 模型名聚合：质量取各家声明最高值、窗口取最大值
+    // （同一款模型在不同网关标称窗口可能不同），providers 保持池的优先级序。
+    function modelAggregates(pool) {
+      const map = new Map()
+      for (const u of pool) {
+        for (const m of eligibleModels(u)) {
+          const cid = canonicalModelId(m.id)
+          if (!cid || cid === 'auto') continue
+          let a = map.get(cid)
+          if (!a) {
+            a = { cid: cid, quality: 0, window: 0, coverage: 0, providers: [], order: map.size }
+            map.set(cid, a)
+          }
+          const w = Number(m.contextWindow) || 0
+          if (w > a.window) a.window = w
+          const q = Number(m.quality) || 0
+          if (q > a.quality) a.quality = q
+          if (!a.providers.some(function (p) { return p.upstream.id === u.id })) {
+            a.providers.push({ upstream: u, model: m.id, window: w })
+          }
+        }
+      }
+      for (const a of map.values()) a.coverage = a.providers.length
+      return map
+    }
+
+    let lastAnchorNote = ''
+    function noteAnchor(a, floor, n3, n4, n5) {
+      const sig = a.cid + '|' + a.quality + '|' + a.coverage + '|' + a.window + '|' + floor + '|' + n3 + ',' + n4 + ',' + n5
+      if (sig === lastAnchorNote) return
+      lastAnchorNote = sig
+      log('[freeroute] auto 锚点 → ' + a.cid + '（质量 ' + a.quality + ' · 交集 ' + a.coverage + ' 家 · 窗口 ' + a.window + '）'
+        + '；备用层 同档 ' + n3 + ' / 够容量 ' + n4 + ' / 兜底 ' + n5 + '（容量下限 ' + floor + '）')
+    }
+
+    // auto 的全部候选，按层输出：
+    //   ① 锚点模型的池内首选提供方
+    //   ② 同款模型的其他厂商（能力与窗口都不变，最无损的一次转移）
+    //   ③ 同质量档且窗口不低于锚点的其他模型（换模型但不掉容量）
+    //   ④ 窗口不低于容量下限的其他模型
+    //   ⑤ 其余（只在前四层全挂时兜底，沉底不删除）
+    // MAX_CHAIN 给链长封顶：免费池里「每个 cid 的全家提供方」可能是几十条，
+    // 逐条试错会把首字延迟抬到不可接受。
+    //
+    // floor = max(本次请求粗估占用, 粘性实际服务窗口)：前者保证不会把已经长大
+    // 的会话塞进装不下的模型，后者保证跨请求不来回抖动（根因 D）。装不下的
+    // 锚点会被「装得下的最优候选」顶替，但候选本身一个都不删——全部装不下时
+    // 仍按原顺序试，让错误信息来自真实上游而不是路由器的猜测。
+    const MAX_CHAIN = 12
+    function autoChain(pool, floor) {
+      const agg = modelAggregates(pool)
+      if (agg.size === 0) return []
+      const seed = agg.get(canonicalModelId(defaultModelFor(pool[0]))) || null
+      let anchor = seed
+      for (const a of agg.values()) {
+        if (!anchor) { anchor = a; continue }
+        if (a.quality > anchor.quality) { anchor = a; continue }
+        if (a.quality === anchor.quality && a.coverage > anchor.coverage) anchor = a
+      }
+      // 容量可行性优先于质量与交集：锚点装不下本次会话时，改挑装得下里最好的。
+      // 窗口未知（0）不当作「装不下」——网关没报 context_length 时，旧逻辑也
+      // 把它当同窗放行，这里保持一致，否则一个没报窗口的目录会被整条踢下去。
+      if (floor > 0 && anchor && anchor.window > 0 && anchor.window < floor) {
+        let best = null
+        for (const a of agg.values()) {
+          if (a.window < floor) continue
+          if (!best
+            || a.quality > best.quality
+            || (a.quality === best.quality && a.coverage > best.coverage)
+            || (a.quality === best.quality && a.coverage === best.coverage && a.window > best.window)) best = a
+        }
+        if (best) anchor = best
+      }
+      const chain = []
+      const used = new Set()
+      const emit = function (a) {
+        for (const p of a.providers) {
+          if (chain.length >= MAX_CHAIN) return
+          const k = p.upstream.id + '|' + p.model
+          if (used.has(k)) continue
+          used.add(k)
+          chain.push({ upstream: p.upstream, model: p.model })
+        }
+      }
+      emit(anchor)
+      const tier3 = []
+      const tier4 = []
+      const tier5 = []
+      for (const a of agg.values()) {
+        if (a === anchor) continue
+        if (a.quality === anchor.quality && (a.window === 0 || a.window >= anchor.window)) tier3.push(a)
+        else if (a.window === 0 || a.window >= floor) tier4.push(a)
+        else tier5.push(a)
+      }
+      // 层内排序：质量档 → 用户优先级 → 交集家数 → 窗口。
+      // 「用户优先级」排在交集之前，是为了让同一家上游的多个模型保持相邻：
+      // 某个模型下线时能立刻换到同家的备选，而不是把整家上游错误地冷却掉
+      // （chaseChain 的 suppressCooldown 依赖「下一个候选还在同一家」）。
+      const byScore = function (x, y) {
+        if (y.quality !== x.quality) return y.quality - x.quality
+        if (x.order !== y.order) return x.order - y.order
+        if (y.coverage !== x.coverage) return y.coverage - x.coverage
+        if (y.window !== x.window) return y.window - x.window
+        return 0
+      }
+      tier3.sort(byScore)
+      tier4.sort(byScore)
+      tier5.sort(byScore)
+      for (const a of tier3) emit(a)
+      for (const a of tier4) emit(a)
+      for (const a of tier5) emit(a)
+      noteAnchor(anchor, floor, tier3.length, tier4.length, tier5.length)
+      return chain
     }
 
     // 最近一次成功服务的上下文窗口（粘性基准）。会话在大窗口上游上积累出
@@ -1397,13 +1686,17 @@ function log (message) {
       return same.concat(smaller)
     }
 
-    async function candidatesFor(model) {
+    async function candidatesFor(model, need) {
       const enabled = orderedUpstreams().filter(function (u) { return isEnabled(u.id) })
       const keyed = []
       for (const u of enabled) { if (await hasCredential(u)) keyed.push(u) }
       if (keyed.length === 0) return []
       const healthy = keyed.filter(function (u) { return !cooling(u.id) })
       const pool = healthy.length > 0 ? healthy : keyed.slice().sort(function (a, b) { return ((health.get(a.id) || {}).cooldownUntil || 0) - ((health.get(b.id) || {}).cooldownUntil || 0) })
+      // 容量下限 floor = 本次请求粗估占用 与 粘性实际服务窗口 的较大值：
+      // 前者防止把已经长大的会话塞进装不下的模型，后者防止跨请求抖动。
+      const floor = Math.max(Number(need) || 0, lastServedWindow)
+      if (model === 'auto') return autoChain(pool, floor)
       return tierByContextWindow(candidatesSync(pool, model))
     }
 
@@ -1477,7 +1770,8 @@ function log (message) {
 
     async function* failoverStream(options) {
       const isAuto = options.model === 'auto'
-      const cands = await candidatesFor(options.model)
+      const need = estimateContextTokens(options)
+      const cands = await candidatesFor(options.model, need)
       if (cands.length === 0 && isAuto) {
         throw mkFail('没有可用的免费上游：请先在 设置 → freeroute 中启用并配置至少一个 API Key', 'NO_UPSTREAM')
       }
@@ -1503,7 +1797,7 @@ function log (message) {
       // 用户选单个模型表达的是「偏好」，不是「宁可失败也不用别家」。
       const tried = new Set()
       for (const c of cands) tried.add(c.upstream.id + '|' + c.model)
-      const fb = (await candidatesFor('auto')).filter(function (c) { return !tried.has(c.upstream.id + '|' + c.model) })
+      const fb = (await candidatesFor('auto', need)).filter(function (c) { return !tried.has(c.upstream.id + '|' + c.model) })
       if (fb.length === 0) {
         // 原始错误比笼统的 NO_UPSTREAM 更有诊断价值
         if (primaryErr) throw primaryErr
@@ -1546,13 +1840,15 @@ function log (message) {
         // 未配 Key 上游的模型不展示（选了也用不了）；付费模型不进选择器，
         // 但显式指定（freeroute/<id> 或通用名）仍可派发，见 candidatesSync。
         const readySet = await readyUpstreamIdSet()
-        const out = [{ provider: ROUTE, id: 'auto', name: '⚡ Auto（自动切换）', description: '按优先级在已启用的免费上游间自动选择与切换', inputModalities: ['text'] }]
+        // 模态声明：auto 不声明（未知 = 允许附图，路由失败再自动切换）；
+        // 单个免费模型仅在来源明确声明支持图片时带上 ['text','image']。
+        const out = [{ provider: ROUTE, id: 'auto', name: '⚡ Auto（自动切换）', description: '按优先级在已启用的免费上游间自动选择与切换' }]
         const freeList = []
         for (const entry of buildAliasIndex().values()) {
           if (entry.free !== true) continue
           const viaReady = entry.via.filter(function (v) { return readySet.has(v.upstream) })
           if (viaReady.length === 0) continue
-          freeList.push({ provider: ROUTE, id: entry.id, name: entry.name || entry.id, description: '免费模型 · ' + viaReady.length + ' 家上游 · 失效自动切换', inputModalities: ['text'] })
+          freeList.push(withModalities({ provider: ROUTE, id: entry.id, name: entry.name || entry.id, description: '免费模型 · ' + viaReady.length + ' 家上游 · 失效自动切换' }, entry))
         }
         const byId = function (a, b) { return a.id < b.id ? -1 : a.id > b.id ? 1 : 0 }
         freeList.sort(byId)
@@ -1561,8 +1857,10 @@ function log (message) {
       resolveModel: async function (provider, model) {
         // auto 不再写死 32768：按当前候选链首选模型上报真实窗口（根因 A）。
         // 否则 dsh 永远按 32K 管理会话，稍长对话就被压缩裁剪、上下文经常断。
+        // 模态不声明（未知）：用户在 auto 下发图不会被宿主拦下，具体上游不
+        // 识图时由 4xx → 候选链自动换模型/换上游。
         if (model === 'auto') {
-          return { provider: ROUTE, id: model, name: '⚡ Auto（自动切换）', inputModalities: ['text'], context: { contextWindow: await autoContextWindow() } }
+          return { provider: ROUTE, id: model, name: '⚡ Auto（自动切换）', context: { contextWindow: await autoContextWindow() } }
         }
         let found = null
         const slash = model.indexOf('/')
@@ -1590,7 +1888,7 @@ function log (message) {
                 }
               }
             }
-            found = { name: entry.name, contextWindow: cw, free: entry.free }
+            found = { name: entry.name, contextWindow: cw, free: entry.free, inputModalities: entry.inputModalities }
           }
         }
         if (!found) {
@@ -1600,9 +1898,9 @@ function log (message) {
           }
         }
         if (found) {
-          return { provider: ROUTE, id: model, name: found.name || model, inputModalities: ['text'], context: { contextWindow: found.contextWindow || 32768 } }
+          return withModalities({ provider: ROUTE, id: model, name: found.name || model, context: { contextWindow: found.contextWindow || 32768 } }, found)
         }
-        return { provider: ROUTE, id: model, name: model, inputModalities: ['text'], context: { contextWindow: 32768 } }
+        return { provider: ROUTE, id: model, name: model, context: { contextWindow: 32768 } }
       },
       // dsh 的 LlmAdapter 契约要求 prepareCall（基类有默认实现，但普通对象
       // 字面量适配器必须自带）：把模型元数据与本次分发的流入口绑定到同一代。
@@ -1807,14 +2105,27 @@ function log (message) {
     //    原值写入 takeoverBackup，关闭时恢复。
     const DEFAULT_MODEL_NS_NAME = 'agent-default-model'
 
-    // settings 用户层是否已显式配置默认模型（settings.section 读原始用户层，
-    // 与组合 base 默认无关：仅用户亲手写过才算「显式配置」）
+    // settings 用户层是否已显式配置默认模型（读原始用户层，与组合 base 默认
+    // 无关：仅用户亲手写过才算「显式配置」）
+    // dsh ≤0.1.5：settings.section(ns) 直读用户层；dsh ≥0.1.7 该读 API 随
+    // settings.yaml 章节一并移除，改走 describe() 的用户层投影（row.user）。
+    // 必须特性检测：新版下调 section 会 throw → 静默 false → 自动接管会
+    // 覆盖用户显式选择的默认模型（v0.7.2 接管纪律回归）。
     function userDefaultExplicit() {
       try {
         if (settings === undefined) return false
-        const sec = settings.section(DEFAULT_MODEL_NS_NAME)
-        return !!(sec && typeof sec.provider === 'string' && sec.provider.length > 0 && typeof sec.model === 'string' && sec.model.length > 0)
-      } catch (e) { return false }
+        if (typeof settings.section === 'function') {
+          const sec = settings.section(DEFAULT_MODEL_NS_NAME)
+          return !!(sec && typeof sec.provider === 'string' && sec.provider.length > 0 && typeof sec.model === 'string' && sec.model.length > 0)
+        }
+        if (typeof settings.describe === 'function') {
+          const rows = settings.describe()
+          const row = Array.isArray(rows) ? rows.find(function (r) { return r && r.ns === DEFAULT_MODEL_NS_NAME }) : null
+          const u = row && row.user
+          return !!(u && typeof u.provider === 'string' && u.provider.length > 0 && typeof u.model === 'string' && u.model.length > 0)
+        }
+      } catch (e) { }
+      return false
     }
 
     // 持久化接管标记与原值备份（JSON 文件模式 / settings 模式）
@@ -2114,6 +2425,13 @@ function log (message) {
                 if (typeof m.id !== 'string' || m.id.length === 0 || m.id.length > 200) return 'custom.models[].id 无效'
                 if (m.name !== undefined && typeof m.name !== 'string') return 'custom.models[].name 无效'
                 if (m.contextWindow !== undefined && !(Number(m.contextWindow) > 0)) return 'custom.models[].contextWindow 无效'
+                // 可选视觉声明（与目录字段同义）：显式列出输入模态。只接受
+                // text/image；省略 = 未知（图片原样透传，由上游裁决）。
+                if (m.inputModalities !== undefined) {
+                  if (!Array.isArray(m.inputModalities) || m.inputModalities.length === 0 || m.inputModalities.length > 4) return 'custom.models[].inputModalities 需为 1-4 项数组'
+                  for (const im of m.inputModalities) { if (im !== 'text' && im !== 'image') return 'custom.models[].inputModalities 仅支持 text/image' }
+                }
+                if (m.vision !== undefined && typeof m.vision !== 'boolean') return 'custom.models[].vision 需为布尔值'
               }
             }
           }
@@ -2357,6 +2675,21 @@ function log (message) {
         if (m.role === 'tool') {
           out.push({ role: 'user', content: [{ type: 'tool-result', toolCallId: m.tool_call_id || '', content: [{ type: 'text', text: strContent(m.content) || '(no output)' }] }] }); continue
         }
+        // OpenAI 多模态部件要转成 dsh 原生 image 块，交给 transport 出站。
+        // 只抽文本会在这里静默剥掉 image_url 部件（0.8.7 前的实际行为）：
+        // 模型只会「听说」有图，看不见像素。file:/ 空部件按既有约定丢弃。
+        if (Array.isArray(m.content)) {
+          const blocks = []
+          for (const p of m.content) {
+            if (p && p.type === 'text' && typeof p.text === 'string' && p.text.length > 0) { blocks.push({ type: 'text', text: p.text }); continue }
+            if (p && p.type === 'image_url' && p.image_url && typeof p.image_url.url === 'string' && p.image_url.url.length > 0) {
+              const dm = /^data:([^;,]+)?(;base64)?,(.*)$/s.exec(p.image_url.url)
+              if (dm !== null) { blocks.push({ type: 'image', mimeType: dm[1] || 'image/png', data: dm[3] }); continue }
+              if (/^https?:\/\//.test(p.image_url.url)) blocks.push({ type: 'image', url: p.image_url.url })
+            }
+          }
+          if (blocks.length > 0) { out.push({ role: 'user', content: blocks }); continue }
+        }
         out.push({ role: 'user', content: [{ type: 'text', text: strContent(m.content) }] })
       }
       return out
@@ -2472,7 +2805,11 @@ function log (message) {
         configFileOk = true
         userConfig = sanitizeConfig(raw)
         importDeclaredKeys(raw).catch(function () { })
-      } else if (settings !== undefined) {
+      } else if (settings !== undefined && typeof settings.register === 'function') {
+        // dsh ≤0.1.5：注册 free-proxy 章节 + watch 回退（文件不可写时以 settings 为源）。
+        // dsh ≥0.1.7 移除 settings.register（章节改由插件 Config 声明 + profile
+        // patch 驱动）——本插件文件优先、设置面板独立挂载，无需章节注册；
+        // 此处静默跳过，走 sanitizeConfig({}) 默认值。
         try {
           const scope = settings.register(NS, ConfigSchema)
           const seeded = sanitizeConfig(scope.get())
@@ -2499,6 +2836,15 @@ function log (message) {
             })
           }
         } catch (e) { console.error('[freeroute] settings 注册失败:', emsg(e)) }
+      } else if (settings !== undefined) {
+        // dsh ≥0.1.7：settings.register 已移除（章节改由插件 Config 声明 +
+        // profile patch 驱动，'free-proxy' 这类第三方命名章节无法再注册，
+        // settings.update/replace 对未知 ns 一律抛 No configurable plugin
+        // entry——applyPatch 等全部 RPC 写路径的 settings 回退都会死）。
+        // 文件优先模式下直接以默认值落盘，让全部配置写入走文件路径；
+        // 落盘失败才退回 settings 语义（新版必拒，RPC 层已有兜底报错）。
+        userConfig = sanitizeConfig({})
+        if (configPath && fsx !== null && writeConfigFile()) configFileOk = true
       }
     }
     if (configFileOk) log('[freeroute] 配置文件:', configPath)

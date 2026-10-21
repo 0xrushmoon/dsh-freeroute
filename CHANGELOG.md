@@ -4,6 +4,531 @@ All notable changes to this project are documented in this file. The format
 is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the
 project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.9.0]
+
+### Added
+
+- **模型质量档 `quality`（可选，1..5）**：auto 路由的第一排序键。插件能观测
+  成功/失败/延迟，但观测不到「答得好不好」，所以模型强弱必须由目录显式声明；
+  未声明（0）时完全退回原有优先级序，既有配置行为不变。声明位置：内置种子表、
+  远程目录的 `models[].quality`、或 `~/.dsh/freeroute.json` 的
+  `upstreams.<id>.custom.models[].quality`（sanitize 已放行，不会被静默丢弃）。
+  探测结果整表替换静态表时，声明值按 canonical 名重新贴回，不会因某家
+  `/models` 探通而丢失。
+- **交集家数（coverage）作为第二排序键**：同一款模型被多少家上游同时提供。
+  交集越大，「同款模型跨厂商」这条零损耗故障转移链越深——免费池天天限流，
+  一个 5 家都在的模型比只有 1 家的小众预览款可靠得多。
+- **auto 候选链显式分层**（此前只有「同模型跨厂商 + 按上游优先级」两段）：
+  ① 锚点模型的首选提供方 → ② 同款模型的其他厂商（能力与窗口不变，最无损）
+  → ③ 同质量档且窗口不低于锚点的其他模型（换模型但不掉容量）→ ④ 窗口不低于
+  容量下限的其他模型 → ⑤ 其余兜底（沉底不删除）。
+- **按本次请求估算上下文占用**：用 `messages` + `tools` 的字符量粗估 token
+  （CJK 1.6 字符/token、其余 3.5，另加响应预留与 10% 余量），与粘性窗口取较大
+  值作为容量下限。此前容量下限只看进程级粘性窗口，新会话会继承上一个会话的
+  大窗口基准。
+
+### Changed
+
+- **锚点不再以「窗口最大」为准**：窗口大 ≠ 能力强——1M 窗口的 lite 款在工具
+  调用密集的编码场景里远不如 128K 的正式款。窗口只在「本次会话装不下」时才
+  参与决策（容量可行性优先于质量），未知窗口（网关未报 `context_length`）
+  不当作装不下，与旧行为一致。
+- **层内排序为「质量档 → 用户优先级 → 交集家数 → 窗口」**：用户优先级排在
+  交集之前是刻意的，让同一家上游的多个模型保持相邻，某个模型下线时能立刻换到
+  同家备选，而不是把整家上游错误地冷却掉。
+- 链长上限 12（`MAX_CHAIN`）：免费池里「每个模型的全家提供方」可能有几十条，
+  逐条试错会把首字延迟抬到不可接受。
+
+### Fixed
+
+- 集成测试里三段「模型级故障转移 / Key 轮换 / 失败触发重探」依赖前面各段
+  遗留的已启用上游来兜底，池子一旦被清干净就整条链失败；现在每段先用
+  `isolatePool()` 清空上游池，再布置本段 mock，断言不再随执行顺序漂移。
+
+## [0.8.25]（未单独发布，内容并入 0.9.0）
+
+### Added
+
+- **两家免 Key 免费网关实测可用（示例配置，未入默认目录）**：按目录 schema
+  惯例，免鉴权自建/第三方网关不入默认目录，示例见 `schema.md`；两者均已
+  实测 200 出字，可直接复制进 `~/.dsh/freeroute.json` 的 `upstreams`：
+  - **Kilo Code**（`https://api.kilo.ai/api/gateway`，`noAuth: true`）：免费池
+    18 款，约 200 次/小时（远宽于 OpenRouter `:free` 的 50 次/天），
+    `kilo-auto/free` 为自动路由；`kilo-auto/free` / `xing4.0-29b-a4b` /
+    `minimax-m3.1-flash` 实测 200 出字；国内可直连。
+  - **LLM7.io**（`https://api.llm7.io/v1`，`noAuth: true`）：匿名 turbo 档
+    7 款（DeepSeek-V4-Flash-0731 / GLM-5.3-Flash / gpt-oss:20b / minimax-m2.7
+    / nemotron-3-nano:30b / codestral-latest / mistral-Nemo），实测 200 出字；
+    pro 档需付费 token；国内可直连。
+
+### Changed
+
+- **目录 2026-10-20 全上游 live 复查**（12 上游逐一 `/models` + chat 实测；
+  远程双源部署后旧版插件免升级热拉取，本版同步仓库备份副本）：
+  - **openrouter**：`:free` 15→18——minimax/minimax-m3.1-flash:free（1M，
+    text+image+video）、nvidia/nemotron-3.5-super-vl:free（1M 多模态，18s
+    偏慢）、xingchen-agi/xing4.0-29b-a4b:free（262k，中文推理）实测 200
+    收入；lyria 系 $0 但为音乐生成，不收录。
+  - **nvidia**：免费面 8→10——nemotron-3.5-super-vl-120b-a12b（825ms）、
+    step-5-preview（21s）、muse-glimmer-30b（7.5s）收入；kimi-k3 已从
+    `/models` 下架移除；kimi-k2.6 在列但 404 未开通、deepseek-v4.1-flash
+    与 gemma-4-31b 两轮超时不收录。
+  - **opencode**：`-free` 收敛为 9 款（space-bunny-free 已废弃并被上游引导
+    改用 minimax-m3.1-flash-free，默认模型随切）；**本机两把 Key 均已过期**
+    （`401 api_key_expired`，重新登录不会续期，需到 Console 重新生成）；
+    免费档客户端围栏（FreeTierError）仍未解，第三方直调不可用。
+  - **orcarouter**：`deepseek/deepseek-v4.1-flash-free`（1M、text+image）上新
+    收录，实测仍撞 GitHub 账号年龄围栏 429；`orcarouter/fusion/auto` 系为
+    付费款不收录；`orcarouter/free` 实测 402 allowance used up。
+  - **aihubmix**：`-free` 命名 44→47——qwen3.8-flash-free / qwen3.8-max-free
+    收录（撞账号 10 次试用门，计费未验）；ling-3.0-flash-free 仍 400
+    cannot be served，维持观察。
+  - **b-ai**：`/models` 2→62 款（hy4-preview、glm-5.3-flash、kimi-k3 等），
+    零余额实测全 400 credit insufficient balance，免费档仍未恢复。
+  - **amd-radeon**：11 款对话模型无下架；新增 5 款非对话（SystemOne / OCR /
+    TTS 端点）不收录。
+  - **sensenova / zenmux / askdiandian**：现役款复测 200，名单无增删
+    （u1.5-lite 404、deepseek-v4.1-flash 403 plan 未开放）。
+
+## [0.8.24]
+
+### Changed
+
+- **目录 2026-10-10 全上游 live 复查**（10 上游逐一 `/models` + chat 实测；
+  远程双源已部署生效，旧版插件免升级热拉取，本版同步仓库备份副本）：
+  - **openrouter**：ling-3.0-flash-fin/-sante、nex-n2.5-mini/pro、
+    qwen3.8-27b、z-ai/glm-5.2、stealth/union-alpha delisted 移除；
+    apodex-1.1-mini:free 上新收录；inkling 系启用 agentic harness 围栏
+    （带 referer/title 头仍 403）暂保留观察；gemma-4 系 / laguna-xs 为
+    上游共享池 429（暂时性）；8 款按 /models 元数据补视觉声明。
+  - **opencode**：围栏依旧（space-bunny-free 仍唯一实测 200）；
+    deepseek-v4-flash-free / ling-3.0-flash-fin-free / mimo-v2.5-free /
+    nemotron-3-ultra-free / union-alpha 下架移除；ling-3.1-flash-free /
+    step-5-preview-free / longcat-2.5-preview-free 上新（围栏未解 403）；
+    默认模型切至 space-bunny-free。
+  - **nvidia**：glm-5.3 / glm-5.3-flash / gpt-oss-20b / laguna-xs-2.1 /
+    nemotron-3-ultra-550b / nemotron-3.5-lightning-30b 实测 200 收入
+    （2→8 款）；默认模型切至 nemotron-3-super-120b-a12b（kimi-k3 当日
+    3 连超时观察，90s 无首字）；deepseek-v4.1-flash / gemma-4-31b 两轮
+    超时、nano-3 系 404、nano-omni 503 暂不收录。
+  - **orcarouter**：tencent/hy4-preview-free 上新收录；orcarouter/free
+    实测 free_quota_exhausted（日额度耗尽，非下架）；其余 -free 系撞
+    新围栏 free_rate_limited——要求绑定有一定注册时长的 GitHub 账号。
+  - **aihubmix**：免费面 44 款；ling-3.0-flash-free 连续三轮
+    no_available_channel 移出 models；glm-4.7-flash-free / kimi-for-coding-free /
+    k2.6-code-preview-free / qwen3.6-plus-preview-free / coding-minimax-m3-free /
+    xiaomi-mimo-v2.5(-pro)-free 收入 models；本账号 10 次试用已耗尽
+    （HTTP 200 但回试用提示、0 token），充值后恢复。
+  - **amd-radeon**：DeepSeek-V4.1-Flash 重新上架实测 200 收回；
+    DeepSeek-V4-Flash-Vision-Exp 实测 200 收回（均 1M 窗、视觉）；
+    MinerU2.5-Pro 为 OCR 输出模型不收录。
+  - **sensenova**：deepseek-v4-pro 下架移除；sensenova-6.8-flash-lite
+    恢复 200 并补视觉声明；u1.5-lite(404) / deepseek-v4.1-flash(403) 不收录。
+  - **b-ai**：全模型仍 insufficient_user_quota（付费对照 gpt-5.4 亦 403），
+    免费档未恢复，维持免费路由退出。
+  - **zenmux / askdiandian**：现役无变化（glm-4.6v-flash-free 补视觉声明）。
+- **插件图标与 i18n locale 声明**：package.json 增 `icon` 与
+  `./locale/*.json` 导出并把 `locale`、`icon.svg` 纳入 files（icon.svg +
+  locale/en|zh.json），对齐 dsh 插件清单约定。
+
+## [0.8.23]
+
+### Changed
+
+- **适配 dsh 0.1.7-rc.1**（对照 0.1.5-rc.3 逐包排查；tarball 解包比对，未安装）：
+  - **settings 服务重写适配**（0.1.7 移除 settings.yaml 章节，改由插件 Config
+    声明 + profile patch 驱动，`settings.update/replace/mutate` 对未知 ns 一律
+    抛 `No configurable plugin entry`）：
+    - `boot.js`：`settings.register` 特性检测——≤0.1.5 走注册+watch 回退；
+      ≥0.1.7 静默跳过并**以默认值落盘配置文件**，使 applyPatch/setKey 等
+      全部 RPC 写路径继续走文件模式（否则新装环境配置写入全断）。
+    - `takeover.js`：`userDefaultExplicit()` 特性检测——新版 `settings.section`
+      读 API 已移除，改走 `describe()` 用户层投影（row.user）；否则会静默
+      失真导致自动接管覆盖用户显式默认模型（v0.7.2 接管纪律回归）。
+  - **其余契约逐一核实兼容**：llm 适配器接口（providerInfo/providerRetryPolicy/
+    listModels/resolveModel/prepareCall/stream 逐方法一致，新增
+    imageRequestPricing 带默认实现）、harness.handle、webServer.register/port、
+    credentials set/unset/describe/resolve、subprocess spawn/resolveExecutable、
+    agentDefaultModel saveSelection/currentSelection（provider/model 仍为
+    Volatile 可 mutate）、客户端 `settings.section` 插槽契约、typert-protocol
+    API（超集兼容）。
+  - **安装门核实**：0.1.7 插件管理器按 `semver.satisfies(runtime, peer,
+    {includePrerelease: true})` 校验 `@deepseek-ai/dsh-*` peer——现有
+    `^0.1.5-rc.2` 满足 0.1.7-rc.1；peer 放宽为 `>=0.1.5-rc.2` 表达前向兼容。
+  - deps：devDependencies `@deepseek-ai/dsh-typert-protocol` 0.1.5-rc.2 →
+    0.1.7-rc.1、`@deepseek-ai/cordis` ^4.0.2 → ^4.0.4（随宿主对齐）。
+  - 验证：smoke 全过、client-integration 51 项全过；另以新式 settings mock
+    （无 register/section）双案例实证——默认值落盘后接管正常触发、用户显式
+    默认不被打扰。
+
+## [0.8.22]
+
+### Changed
+
+- **免费模型目录 2026-09-24 复查**（live `/models` 全上游探测 + 带 Key 差分计费实测）：
+  - **amd-radeon 换血**：`DeepSeek-V4.1-Flash` 上架仅一日即从 `/models` 下架移除；
+    `MiMo-V2.6-Flash` 上新，实测 200 过计费门（1048k 窗、text+image 视觉），
+    纳入每日 $1 免费额度——mimo v2.6 免费使用面从 aihubmix 扩到 amd-radeon。
+  - **opencode 围栏按款放行**：`space-bunny-free` 实测 200 出字，收入免费档
+    （围栏不再是上游级一刀切）；其余 -free 款实测仍 403 FreeTierError。
+  - **openrouter**：`inclusionai/ling-3.0-flash-vl:free` 已从 `/models` 下架移除。
+  - **b.ai**：`mimo-v2.6-flash` / `mimo-v2.6-pro` 上新仍为付费款（零余额 400
+    insufficient balance：562/1748 credits）；`jev-latest` / `jev-1.13.0` 为
+    `/v1/decisions` 专用端点非 chat，不收录。
+  - **aihubmix**：44 款免费列表无变化；`ling-3.0-flash-free` 连续两日报
+    no_available_channel（仍在 `/models`，持续观察）。
+  - 远程双源已部署生效（双域实测与种子逐字节一致）；本地 runtime custom
+    四字段已按目录同步。
+  - 其余上游 live 复核无变化：orcarouter（新上均为付费款，orcaverify 系
+    检测器仍不收录）、sensenova、nvidia、zenmux、askdiandian。
+
+## [0.8.21]
+
+### Changed
+
+- **免费模型目录 2026-09-22 复查——mimo v2.6 系转免费**（live `/models` 全上游探测 + 带 Key 差分计费实测）：
+  - **aihubmix 42→44**：`xiaomi-mimo-v2.6-flash-free` / `xiaomi-mimo-v2.6-pro-free`
+    上新收录（`/models` 在列 + `-free` 命名契约；实测命中「未充值仅 10 次试用」
+    的账号级试用门——既有免费款 coding-glm-5.3-free 同样命中，证明非模型级拒绝）。
+    `ling-3.0-flash-free` 暂报 cannot be served（仍在 `/models`，观察项保留）。
+  - **sensenova 3→6**：`sensenova-6.7-flash-lite` 已从 `/models` 下架，先于计费
+    验证移除；`glm-5.2` / `kimi-k3` / `deepseek-v4-pro` / `deepseek-flash` 四款
+    pricing=0 且实测 200 出字，新收入免费档；`u1-fast` / `u1.5-lite` 虽
+    pricing=0 但当前账号 plan 未开放（404）、`deepseek-v4.1-flash` 被 plan 门
+    403 拒绝，均暂不收录。
+  - **openrouter 22→23**：`qwen/qwen3.8-27b:free` 上新（$0 定价、262k、
+    text+image+video；实测连续 429 拥挤，交由插件冷却切换）。
+  - **amd-radeon 5→6**：`DeepSeek-V4.1-Flash` 上新，实测 200 出字（含视觉，
+    1048k 窗），纳入每日 $1 免费额度；MinerU2.5-Pro 仍为 OCR 专用未收录。
+  - **b.ai 免费档未恢复**：`mimo-v2.5` / `mimo-v2.5-pro` 实测为付费款（零余额
+    报 credit insufficient balance：单次 58/1748 credits），维持免费路由退出。
+  - **opencode 客户端围栏依旧**：`mimo-v2.5-free` / `mimo-v2.6-flash-free`
+    实测 403 FreeTierError；`mimo-v2.6-flash-free` / `jev-1.13-free` 上新先录
+    models 待围栏解除。
+  - **远程双源已部署生效**（config.freetokenbox.com 与 freeroute-catalog.pages.dev
+    双域实测与种子逐字节一致），并补上了 0.8.20 欠下的部署；本地 runtime
+    `~/.dsh/freeroute.json` 的 custom 四字段（freeModels/models/defaultModel/note）
+    已按目录同步（gmi 手工上游不属目录管辖，未触碰）。
+  - 其余上游 live 复核无变化：orcarouter（orcaverify 系文本检测器不收录）、
+    nvidia、zenmux、askdiandian 全部在列。
+
+## [0.8.20]
+
+### Changed
+
+- **免费模型目录 2026-09-18 复查**（live `/models` 全上游探测）：
+  - **aihubmix 免费列表 53→42**：`gemini-3-flash-preview-free`、
+    `gemini-3.5/3.6/3.7/3.8-flash-free`、`gemma-4-26b/31b-it-free`、
+    `gpt-4.1(-mini/-nano)-free`、`gpt-4o-free`、`gpt-5.5-free`、
+    `gpt-image-2-free`、`gpt-oss-20b-free` 共 14 款已从上游 `/models`
+    下架（delisted 即无法路由，先于计费验证移除）；新上
+    `agents-a1-free` / `intern-s2-free` / `union-alpha-free`（按上游
+    `-free` 命名收录，计费未实测，models 元数据沿用 131072 约定）。
+  - **仓库种子目录与远程同源对齐**：`freeroute-dynamic/catalog/
+    freeroute-catalog.json` 此前停留在 2026-09-11 状态（b.ai 免费档
+    未置空、openrouter 缺 09-16 新款、orcarouter 已下线的
+    qwen3.8-27b-free 未移除、字段仍用旧名 `baseUrl`），现与主源
+    config.freetokenbox.com 完全同步（`api` 字段名，解析器两者兼容），
+    并叠加本次 aihubmix 复查；解析器实测通过（10 上游全部正常归一化）。
+  - 其余上游 live 复核无变化：orcarouter 4 款、nvidia 2 款、zenmux 2 款、
+    opencode（围栏维持置空）、askdiandian 1 款全部在列；
+    openrouter `stealth/union-alpha` 不进 `/models` 属 stealth 预期，
+    维持收录；b.ai / sensenova / amd-radeon 需鉴权，维持 09-16 结论。
+  - **注意**：远程源（config.freetokenbox.com 与
+    freeroute-catalog.pages.dev）需重新部署后本次 aihubmix 修订才对
+    运行时生效；仓库内种子先行落盘。
+
+### Dependencies
+
+- eslint 10.9.0 → 10.11.0、@deepseek-ai/cordis 4.0.1 → 4.0.2（lint/test 全绿）。
+
+## [0.8.18]
+
+### Changed
+
+- **Union Alpha stealth 预览接入**（2026-09-16 发布当日复核）：
+  - **openrouter 新增 `stealth/union-alpha`**：$0 计费实测出字（cost:0）、
+    262k 上下文、支持视觉、不占 `:free` 日额——freeModels 显式声明免费。
+  - **opencode 上新 `union-alpha` 但免费档启用客户端围栏**：API 直调无论
+    是否带 Key 均报 FreeTierError（「free tier can only be used from within
+    OpenCode」），7 款 -free 暂无法从第三方工具调用——freeModels 置空、
+    defaultModel 改 union-alpha，opencode 暂从免费路由退出（目录同步）。
+
+## [0.8.17]
+
+### Changed
+
+- **免费模型目录 2026-09-16 全量复查**（live 探测 + 带 Key 实测）：
+  - **B.AI 免费档失效**：deepseek-v4-flash / deepseek-v4-flash-vision-exp 已
+    从 /models 下线；零余额账户实测全模型返回 insufficient_user_quota（含
+    旧免费款 hy3 / mimo-v2.5）。种子表 freeModels 置空、models 收敛为在列
+    2 款、defaultModel 改 hy3——B.AI 暂从免费路由退出（充值后可用性未验证）。
+  - 远程目录同步更新并部署（config.freetokenbox.com 与
+    freeroute-catalog.pages.dev 双源一致）：openrouter 新增
+    z-ai/glm-5.2:free 与 inclusionai/ling-3.0-flash-vl:free、移除两款
+    下线 minimax；amd-radeon 换血（Vision-Exp 下线，GLM-5.3-Flash /
+    Qwen3.8-27B 上新且实测出字，MinerU2.5-Pro 为 OCR 专用未收录）；
+    aihubmix minimax-m3-free 下线（54→53）；orcarouter 清理 qwen3.8-27b-free
+    （orcaverify-text1.0-free 为检测专用模型不收录）；nvidia 清理 minimax-m3。
+  - 高级设置 freeModels 示例与 test/e2e-bai.mjs 断言同步新现实。
+
+## [0.8.16]
+
+### Changed
+
+- 行头内边距收紧 `8px 10px` → `8px`；卡片圆角 16px → 10px（与模型条目
+  一致，紧凑行观感更协调）；卡身水平内边距同步对齐 8px。
+
+## [0.8.15]
+
+### Fixed
+
+- **根治「旧样式层叠泄漏」**——这是 0.8.13/0.8.14 三项症状（行头
+  `width: 100%`、text 堆叠换行、卡片双内边距偏高）的真正来源：`dsh web`
+  进程重启/插件热更后，长开的浏览器页签里旧版本 `<style>` 成为孤儿（其
+  disposer 已随旧进程消亡），旧规则顶掉新表未显式声明的属性。
+  - CSS 头部加**版本标记**（`/* dsh-freeroute-client-css v<version> */`，
+    构建时由 package.json 单源注入，动态/静态两条构建链同步）。
+  - 挂载时执行 `sweepStaleStyles()`：按标记清扫所有非当前版本的
+    freeroute 样式元素（以 `.frp-tab`/`.frp-cards` 独有选择器识别，
+    不触碰宿主与第三方样式）。动态（styles.insert）与静态（web 模块）
+    两条挂载路径都已接入。
+  - 无头 Chrome 端到端实测：清扫后旧表（0.8.10/0.8.11 模拟）全部移除、
+    当前版本表保留、宿主样式不动、`width:100%`/旧 padding/column 泄漏消失。
+
+### Tests
+
+- client-integration 51 项全绿（清扫函数在无 document 环境下守卫直返）。
+
+## [0.8.14]
+
+### Changed
+
+- **上游/模型卡片几何修复**（无头 Chrome 实测驱动，修正三项反馈）：
+  - 按反馈**删除 `.frp-ucard` 的 `padding: 12px 14px`**（连同 `gap`），内边距改由
+    行头（`8px 10px`）与卡身（`10px 10px 12px`）各自承担；卡片高度 46→38px，
+    不再撑宽撑高。
+  - **chevron 改固定 16px 方形盒**：原先裸 '›' 旋转后字形戳出行头右缘
+    （实测任意宽度恒定溢出 7px，即「head 超出外部区域」），方形盒旋转后
+    溢出归零。
+  - 行头/文本区显式 `flex-direction: row` + `flex-wrap: nowrap`（防御性：
+    任何环境下名称/标签/圆点都不堆叠换行，超长一律省略号）。
+  - ↑/↓ 图标按钮微缩（11px / padding 2px 5px），缓解行头拥挤。
+
+### Tests
+
+- 无头 Chrome 几何回归：200–720px 全宽度卡片高 38px、head 溢出 0、
+  text 单行 20px、name 正常省略。client-integration 51 项不变全绿。
+
+## [0.8.13]
+
+### Changed
+
+- **「免费」列表行几何对齐默认 provider 行**（修正 0.8.11 引入的布局偏差）：
+  - 模型条目放弃比例网格列（第二列文字从行中 58% 处起排，视觉居中悬浮），
+    改为单行 flex 左贴：等宽 id 定宽 + 名称·上下文弹性左对齐（超长省略）+
+    chevron 靠右；条目内边距 6px → 4px 8px（≈原生 candidate 行 26px）。
+  - 供应商映射行同步收紧（padding 4px 8px），与模型行同高。
+  - 上游行头对齐原生 rowIdentity/rowActions 结构：名称 → Key 标签 → 状态圆点
+    顺序（credentialDot 同位），控件区（↑/↓/开关）改 `margin-left:auto` 右移，
+    文本区不再 `flex:1`；圆点 9px → 8px 对齐原生 credentialDot。
+
+### Tests
+
+- client-integration 第 7 节断言同步（行头 rowIdentity 三件套、chevron 索引、
+  模型行条左贴结构），51 项全绿。
+
+## [0.8.12]
+
+### Changed
+
+- **「免费」面板字号整体收一档**：行头名称 14→13px、模型 id 与供应商映射模型
+  13→12px、字段值 13→12px、高级设置分组标题 15→13px、面板头标题 16→14px。
+  卡片/网格/字段结构不变，仅回到紧凑排版。
+
+## [0.8.11]
+
+### Changed
+
+- **「免费」面板列表形态对齐「设置 → 模型」页（默认模型列表）**：
+  - 上游卡片改为宿主 rowCard 形态——透明底、`.5px` 边框、圆角 16px、内边距
+    12px 14px；行头内联一行：状态圆点 + 名称（14px/500）+ Key 状态小标签
+    （rowTag 同款）+ ↑/↓ + 启停开关 + 旋转 chevron；完整状态摘要（免费模型
+    占比 / 冷却 / 上次探测）挪进卡身「运行状态」字段行，行头不再换行拥挤。
+  - 「模型」卡条目改为宿主 modelEntry 形态——小边框盒 + 网格行
+    （等宽字体模型 id | 名称 · 上下文 | chevron），点击展开「供应商」字段行，
+    逐行列出上游名 + 实际映射模型（等宽字体），替代原先名称/上下文/供应商
+    三行混排的紧凑行列表。
+  - 卡片栈间距对齐模型页 rows（8px）；`.frp-tag` 对齐 rowTag token。
+
+### Tests
+
+- client-integration 第 7 节更新并新增断言（总计 51 项）：行头 Key 标签、
+  运行状态字段行、modelEntry 网格行（role=button + aria-expanded）、
+  供应商 vialist/viarow（上游名 + 映射模型）。
+
+## [0.8.10]
+
+### Changed
+
+- **「免费」面板重排为「设置 → 插件」页同款的可展开卡片**：每家上游一张卡——
+  卡片头（名称 15px/600 + 状态摘要 13px 上下两行 + ↑/↓ 优先级 + 启停开关 +
+  旋转 chevron）点击就地展开卡身（密钥/测试连通/探测模型/申请链接），「模型」
+  与「高级设置」（全局代理 + 远程目录）也是同款卡片；高级设置展开后是字段
+  分组而非嵌套卡。样式逐 token 对齐宿主 PluginCard（`.5px` 边框、圆角 16px、
+  bg-layer-3、hover 描边、开卡 bg-layer-2、chevron 旋转 180°），卡片间距 10px
+  与插件页一致。旧的单外框紧凑行列表（`frp-plist`/`frp-prow`）移除。
+- 可达性：卡片头 `role="button"` + `tabIndex` + `aria-expanded`，Enter/Space
+  就地展开；↑/↓/启停开关 `stopPropagation` 不触发展开。
+- 0.8.9 的「默认 | 免费」页签骨架保持（同样对齐插件页顶部结构：下划线页签、
+  aria 角色、方向键导航、访问过的面板保持挂载）。
+
+### Tests
+
+- client-integration 新增第 7 节（19 断言，总计 48 项）：带状态的 React 替身 +
+  完整 state 全量渲染面板——卡片栈/卡片头结构、点击与键盘展开、chevron 旋转、
+  卡身字段分组、隐藏恢复行；state 未到时形状守卫降级卡不炸设置槽。
+
+## [0.8.9]
+
+### Changed
+
+- **恢复「设置 → 模型」页的页签切换形态**：0.8.8 把面板迁到官方
+  `settings.models.footer` 子插槽、渲染为页面底部的可折叠区块；用户反馈
+  「默认 | 免费」页签切换更自然，本版回到 0.8.7 的交互——标题与介绍保持原位，
+  页签条插在介绍之后（结构对齐「设置 → 插件」页：下划线页签、aria 角色、
+  方向键导航），「免费」页签隐藏内置内容并承载完整面板，访问过的面板保持
+  挂载；插件停止时换回原组件、移除页签条并还原可见性，完全可逆。
+- 官方 footer 子插槽渲染在提供方行与添加区之后（页面底部），给不出「同一
+  内容区切换默认/免费」的语义，页签形态仍需换血内置 models 条目的
+  component + 在内置页 DOM 插自绘页签条。该做法在 dsh 0.1.5-rc.2 上实测可用
+  （renderer/settings 客户端与 0.1.2-rc.1 字节一致），并保持防御性实现：
+  只动自建节点、条目缺失退独立设置页、停止完全还原。
+- 0.8.8 的其余内容不变（视觉模态契约修复、免费模型配置刷新、宿主侧测试）。
+
+### Tests
+
+- `client-integration` 测试随页签架构重写：换血条目（component 替换/还原、
+  幂等、options 保留）、无 models 条目兜底、条目晚出现接管、停止可逆（含
+  停止后不复活）、渲染形态（frp-tabpage + 默认 tabpanel 承载原组件 + 懒挂载）
+  与源码契约（tablist/页签文案/MutationObserver 守护/无反引号）。
+
+## [0.8.8]
+
+兼容目标：dsh 0.1.5-rc.2（同时保持对 0.1.2-rc.1 起的行为兼容）。
+
+### Fixed
+
+- **会话内图片输入此前被宿主拦下/丢弃（0.8.6/0.8.7 的透传从未真正生效）**：
+  适配器对所有模型硬编码回传 `inputModalities: ['text']`。按 dsh-llm 的
+  `LlmModelInfo` 契约，**缺省 = 未知**，而**显式 `['text']` = 负能力**：
+  `resolveModelInfo` 会在入站时直接拒绝附图
+  （`MODEL_DOES_NOT_SUPPORT_IMAGES`），已附图的历史消息还会在派发前被投影成
+  `[image omitted because this model accepts text only; …]`——模型只会「听说」
+  有图。现在只有来源明确声明支持视觉的模型才回传 `['text','image']`，其余
+  一律不写该字段（未知 = 图片原样透传给上游，由 4xx → 候选链自愈）。
+- 视觉能力的三条来源全部接通：内置种子表（`deepseek-v4-flash-vision-exp` /
+  `openrouter/free` / `ling-3.0-flash-vl` / `gemma-4` / `glm-4.6v` 等）、
+  远程与 native 目录（`inputModalities: ['text','image']`、简写 `vision: true`、
+  models.dev 的 `modalities.input`）、上游 `GET /models` 探测
+  （OpenRouter 的 `architecture.input_modalities`、部分网关的 `input_modalities`
+  / `modalities`）。自定义上游 patch 与 `apply-patch` 校验同步支持该字段。
+
+### Changed
+
+- **「设置 → 模型」页集成改用宿主官方子插槽 `settings.models.footer`**
+  （dsh 0.1.x 起提供，0.1.5-rc.2 实测可用）：完整 FreeRoute 面板作为提供方行
+  与「添加」区之后的独立区块渲染，标题行可折叠、默认展开（收起即卸载面板，
+  5s 状态轮询随之停止）。删除了自 0.4 起的 DOM 换血实现——包裹内置 models
+  条目的 `component`、`MutationObserver` 往宿主 DOM 插自绘页签条、隐藏/还原
+  兄弟节点——那套做法依赖 `h2`/`intro` 的 DOM 形状与 React reconciliation 的
+  巧合，宿主一改版就会错位或闪烁。
+- 兜底路径保留：宿主未声明该子槽时（旧 dsh / 未加载模型页插件）宽限 2.5s 后
+  回落到独立 freeroute 设置页；声明晚到时兜底页自动撤销，不会出现两个入口。
+  插件停止时所有注册随 fiber 撤销，完全可逆。
+- devDependency `@deepseek-ai/dsh-typert-protocol` `0.1.2-rc.1` → `0.1.5-rc.2`
+  （对齐宿主；运行时仍优先锚定宿主自带副本）。peer 范围保持
+  `>=0.1.0-rc.6 <0.2.0` 不变。
+
+### 免费模型配置
+
+- OpenCode Zen 种子表按 2026-09-11 live 核对重写：`x-preview-f-free` /
+  `hy3-free` / `laguna-s-2.1-free` 均已下线；现役 7 款 `-free`
+  （`deepseek-v4-flash-free` 为首选，含 `muse-spark-1.3/1.2-contributor-free`、
+  `ling-3.0-flash-fin-free`、`nemotron-3.5-lightning-free`、`nemotron-3-ultra-free`、
+  `mimo-v2.5-free`）。
+- OpenRouter 种子表换成现役免费档（`openrouter/free` 等 8 款，其中 4 款带视觉
+  声明）；旧表里的 `deepseek-chat-v3-0324:free` / `qwen-2.5-72b:free` 等已不再免费。
+- SenseNova 首选模型对齐 `deepseek-v4-flash`；`KNOWN_BASE` 修正为
+  `https://token.sensenova.cn/v1`（`api.sensenova.cn/compatible-mode/v1` 对目录
+  同步与推理均返回 403）。
+- 仓库内备份目录 `freeroute-dynamic/catalog/freeroute-catalog.json` 同步到线上
+  10 家上游的现状（此前停在 6 家 / 2026-08-26），并补上视觉声明。
+
+### Tests
+
+- 新增 `freeroute-dynamic/test/client-integration.mjs`（23 断言，纯 node，无需
+  浏览器）：官方 footer 注册、宽限期兜底、晚到声明接管、停止可逆、DOM 换血
+  已移除的源码契约。已纳入 `npm test`。
+- 宿主集成测试新增第 21 节（16 断言）锁死模态语义：声明视觉 → `['text','image']`，
+  未声明/auto/未知模型 → 不带 `inputModalities`；覆盖内置 patch、native 目录、
+  `vision: true` 简写与 `/models` 探测四条路径。
+- smoke 与集成测试全绿（宿主 199 项 + 客户端 23 项 + smoke 全通过）。
+
+### 发布链
+
+- `package.json` 的 `repository` / `homepage` / `bugs` 由 `0xrushmoon/dsh-freeroute`
+  修正为 `dushaobindoudou/dsh-freeroute`（npm 账号与 tag 触发的发布工作流所在
+  仓库）。此前 provenance 校验按 `repository.url` 比对运行工作流的仓库，二者
+  不一致导致 `npm publish` 以 E422 失败；README 徽章、CONTRIBUTING 克隆地址、
+  discussions 链接、目录 `$schema` 与 OpenRouter 的 `http-referer` 同步对齐。
+
+## [0.8.7]
+
+### Fixed
+
+- **入站 OpenAI wire 多模态丢图**（0.8.6 修的是出站腿，本次补上入站腿）：
+  `inboundToInternal` 的 user 分支此前用 `strContent` 只抽文本——客户端以
+  OpenAI 多模态形态（`content:[{type:'text'},{type:'image_url',…}]`）发来的
+  图片部件在入站归一化时被**静默剥掉**，模型只会「听说」有图（实测三种
+  视觉模型全部回复「没有看到图片」）。现在 `image_url` 部件转成 dsh 原生
+  image 块（data URL → `data`+`mimeType`；http(s) → `url`），交由 0.8.6
+  已修好的 transport 出站腿透传；file:/ 空部件按既有约定静默丢弃；纯文本
+  入站（字符串 content）路径不回归。
+- smoke：升级伪 `webServer` 为捕获式，挂载真实 `routeHandler` 到本地端口，
+  新增「■ 4d 入站多模态」用例——OpenAI wire 带图请求必须以
+  `image_url` 部件到达 mock 上游（text+image 次序与内容逐字段断言），
+  并断言纯文本入站不回归。
+
+## [0.8.6]
+
+### Added
+
+- **图片（视觉）内容透传**：`transport.js` 不再对 `type:'image'` 块抛
+  `UNSUPPORTED_CONTENT` 硬错误。dsh 原生图片块（`data`+`mimeType` 或 `url`）
+  与 OpenAI 原生 `image_url` 部件统一归一化后，以标准多模态部件数组
+  （`[{type:'text',…},{type:'image_url',image_url:{url}}]`）发往上游；
+  纯图片消息不虚构 text 部件；无法解析的图片块（file://、空块）静默丢弃
+  而不是毒化整个请求。不识图的模型会由上游以 4xx 明确拒绝并进入既有的
+  wireError/熔断分类——把「是否支持视觉」交还给路由与模型本身。
+- smoke：新增出站请求体捕获，断言图片以 `image_url` 部件到达 mock 上游
+  （取代旧的「本地拒绝图片」断言）。
+
+## [0.8.5]
+
+### Changed
+
+- 兼容 dsh 0.1.2-rc.1：移除 4 个已废弃的 client peerDependencies
+  （`@deepseek-ai/dsh-client-web-react` / `dsh-client-ui-primitives` /
+  `dsh-client-ui-slots` / `dsh-client-runtime`——旧版 client 栈包名，新版
+  dsh 运行时已由 `dsh-client-modules` / `dsh-cordis-client-runner` /
+  `dsh-client-ui-renderer` 取代，且本插件构建产物从未 import 它们，仅产生
+  安装告警并可能误导解析）。保留 `react`（optional，运行时基线模块）与
+  `@deepseek-ai/dsh-typert-protocol`（强制，Typert Remote RPC 契约）。
+- devDependency `@deepseek-ai/dsh-typert-protocol` 对齐宿主版本
+  `0.1.0-rc.6` → `0.1.2-rc.1`（运行时本就锚定宿主副本，此举让 smoke 测试
+  与线上 wire 协议同源）。
+
 ## [0.8.4]
 
 ### Fixed
@@ -56,6 +581,26 @@ project adheres to [Semantic Versioning](https://semver.org/).
   （ISO 时间戳行，追加写）。日志文件按 5 MB 大小或 7 天时效滚动（重命名为
   `.1`），宿主无 `fs`/`os` 注入时静默降级为 no-op。`src/host/` 与
   `src/client/` 下已无任何 `console.log`（仅 `scripts/`、`test/` 的构建与测试工具保留）。
+
+## [0.8.19] - 2026-09-18
+
+dsh 0.1.5-rc.2 compatibility release.
+
+### Fixed
+
+- **Dynamic client polling (P1)**: the dynamic client used
+  `ctxRef.interval(...)`, but the restricted dynamic client context exposes
+  only `get/on/provide/effect` — no timer mixin — so the panel crashed at
+  mount in the dynamic form (the static artifact already used
+  `setInterval`). The source now uses native `setInterval` directly with a
+  disposer, in every form (static, dynamic, and future rebuilds); the static
+  build script asserts the invariant instead of rewriting it.
+
+### Changed
+
+- `@deepseek-ai/dsh-typert-protocol` peer moved to `^0.1.5-rc.2` (the dsh
+  core convention; the old `>=0.1.0-rc.6 <0.2.0` range could never resolve to
+  0.1.5-rc.x under npm prerelease semantics).
 
 ## [Unreleased]
 

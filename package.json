@@ -1,17 +1,21 @@
 {
   "name": "dsh-freeroute",
-  "version": "0.8.4",
+  "version": "0.9.0",
   "description": "Free-tier model aggregation for the DeepSeek Harness (dsh): registers the freeroute provider over a pool of free-quota upstreams (OpenCode Zen / B.AI / OpenRouter / SenseNova built in, plus remote catalogs and custom gateways), transparent failover before first token, multi-key rotation with per-key failure visibility, user-supplied API keys with per-upstream signup tutorials, a settings panel, and an OpenAI-compatible local endpoint.",
+  "icon": "./icon.svg",
   "type": "module",
   "main": "./lib/index.js",
   "exports": {
     ".": "./lib/index.js",
     "./client": "./lib/client.js",
     "./cordis.patch.yml": "./cordis.patch.yml",
+    "./locale/*.json": "./locale/*.json",
     "./package.json": "./package.json"
   },
   "files": [
     "lib",
+    "locale",
+    "icon.svg",
     "cordis.patch.yml",
     "README.md",
     "README.zh-CN.md",
@@ -21,17 +25,17 @@
     "build:static": "npm run build:dynamic && node scripts/build-static.mjs && node scripts/build-static-client.mjs",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
-    "test": "node test/smoke.mjs",
+    "test": "node test/smoke.mjs && node freeroute-dynamic/test/client-integration.mjs",
     "prepublishOnly": "npm run build:static && npm run lint && npm test",
     "build:dynamic": "node scripts/build-dynamic.mjs"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/0xrushmoon/dsh-freeroute.git"
+    "url": "git+https://github.com/dushaobindoudou/dsh-freeroute.git"
   },
-  "homepage": "https://github.com/0xrushmoon/dsh-freeroute",
+  "homepage": "https://github.com/dushaobindoudou/dsh-freeroute",
   "bugs": {
-    "url": "https://github.com/0xrushmoon/dsh-freeroute/issues"
+    "url": "https://github.com/dushaobindoudou/dsh-freeroute/issues"
   },
   "keywords": [
     "deepseek-harness",
@@ -59,9 +63,13 @@
     }
   },
   "peerDependencies": {
-    "@deepseek-ai/dsh-typert-protocol": ">=0.1.0-rc.6 <0.2.0"
+    "react": ">=18",
+    "@deepseek-ai/dsh-typert-protocol": ">=0.1.5-rc.2"
   },
   "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    },
     "@deepseek-ai/dsh-typert-protocol": {
       "optional": false
     }
@@ -70,23 +78,9 @@
     "node": ">=18"
   },
   "devDependencies": {
-    "@deepseek-ai/cordis": "^4.0.1",
-    "@deepseek-ai/dsh-typert-protocol": "0.1.0-rc.6",
+    "@deepseek-ai/cordis": "^4.0.4",
+    "@deepseek-ai/dsh-typert-protocol": "0.1.7-rc.1",
     "@eslint/js": "^10.0.1",
     "eslint": "^10.8.1"
-  },
-  "peerDependencies": {
-    "react": ">=18",
-    "@deepseek-ai/dsh-client-web-react": ">=0.1.0",
-    "@deepseek-ai/dsh-client-ui-primitives": ">=0.1.0",
-    "@deepseek-ai/dsh-client-ui-slots": ">=0.1.0",
-    "@deepseek-ai/dsh-client-runtime": ">=0.1.0"
-  },
-  "peerDependenciesMeta": {
-    "react": { "optional": true },
-    "@deepseek-ai/dsh-client-web-react": { "optional": true },
-    "@deepseek-ai/dsh-client-ui-primitives": { "optional": true },
-    "@deepseek-ai/dsh-client-ui-slots": { "optional": true },
-    "@deepseek-ai/dsh-client-runtime": { "optional": true }
   }
 }

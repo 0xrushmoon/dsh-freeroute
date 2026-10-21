@@ -4,7 +4,7 @@
 
 [![npm version](https://img.shields.io/npm/v/dsh-freeroute.svg?style=flat-square)](https://www.npmjs.com/package/dsh-freeroute)
 [![License](https://img.shields.io/npm/l/dsh-freeroute.svg?style=flat-square)](LICENSE)
-[![CI](https://img.shields.io/github/actions/workflow/status/0xrushmoon/dsh-freeroute/ci.yml?branch=main&style=flat-square&label=ci)](https://github.com/0xrushmoon/dsh-freeroute/actions/workflows/ci.yml)
+[![CI](https://img.shields.io/github/actions/workflow/status/dushaobindoudou/dsh-freeroute/ci.yml?branch=main&style=flat-square&label=ci)](https://github.com/dushaobindoudou/dsh-freeroute/actions/workflows/ci.yml)
 
 [DeepSeek Harness](https://www.npmjs.com/package/@deepseek-ai/dsh)（dsh）的
 免费模型聚合代理：注册 `freeroute` 模型提供方，聚合多家免费额度上游
@@ -35,9 +35,12 @@
 2. **请求翻译**：dsh 内部消息 ⇄ OpenAI Chat Completions SSE；reasoning、
    tool_calls、usage 全量透传。密钥只经 credentials 服务存取。
 3. **健康与故障转移**：失败按类别冷却（鉴权/配置 10 分钟、限流 60 秒、
-   其他指数退避封顶 10 分钟）。`auto` 按优先级选「已启用、已配 Key、未冷却」
-   的上游；未出字的请求失败即切下一家（含空响应检测），已出字的直接抛错。
-   Key 在鉴权/限流失败时单独轮换，并把失效的那一把提示到面板。
+   其他指数退避封顶 10 分钟）。`auto` 的候选链分五层：锚点模型（先比目录声明的
+   `quality` 质量档，再比「多少家上游都有这款模型」的交集家数）→ 同款模型换
+   其他厂商（能力与窗口都不变，最无损）→ 同质量档且窗口不下滑的其他模型 →
+   窗口装得下本次会话的其他模型 → 其余兜底（沉底不删除）。未出字的请求失败即
+   切下一家（含空响应检测），已出字的直接抛错。Key 在鉴权/限流失败时单独轮换，
+   并把失效的那一把提示到面板。
 4. **配置三层合成**：内置目录 → 远程目录（Cloudflare 托管 JSON，免发版更新；
    兼容 native 格式与 models.dev `api.json`，自动筛 0 成本模型）→ 用户 patch
    （`free-proxy` 设置命名空间持久化）。
@@ -55,9 +58,10 @@ dsh 内置的 `设置 -> 模型` 页被可逆地包装增强：标题与介绍�
 介绍之后多一排 **「默认 | 免费」页签**（结构对齐「设置 -> 插件」页：下划线页签、aria 角色、方向键导航、访问过的面板保持挂载）：
 
 - **默认**：原有模型设置原样保留；
-- **免费**：完整 freeroute 面板——上游卡片（启停 / 优先级 / 申请教程 /
-  密钥 / 连通测试 / 健康统计）、一键集成向导、远程目录配置、自定义上游表单
-  （可接本地 uni-api / new-api / LiteLLM 自建网关）。
+- **免费**：完整 freeroute 面板，形态与「设置 → 插件」页一致——每家上游一张
+  可展开卡片（卡片头：名称 + 状态摘要 + 优先级 + 启停开关，点击就地展开
+  密钥 / 连通测试 / 探测模型 / 申请链接），「模型」与「高级设置」（全局代理 +
+  远程目录）也是同款卡片。
 
 设置导航里没有独立的 freeroute 平级项（仅当宿主没有可包装的模型页时才退回
 独立设置页）。`/freeproxy` 命令输出文本状态。
